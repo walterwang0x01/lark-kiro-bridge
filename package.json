@@ -17,8 +17,10 @@
     "build": "tsup",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
     "start": "node bin/lark-kiro-bridge.mjs run",
-    "prepublishOnly": "pnpm typecheck && pnpm build"
+    "prepublishOnly": "pnpm typecheck && pnpm test && pnpm build"
   },
   "dependencies": {
     "@larksuiteoapi/node-sdk": "^1.65.0",
@@ -49,5 +51,18 @@
     "bot",
     "ai-coding-agent"
   ],
-  "license": "MIT"
+  "author": "walterwang0x01",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/walterwang0x01/lark-kiro-bridge.git"
+  },
+  "bugs": {
+    "url": "https://github.com/walterwang0x01/lark-kiro-bridge/issues"
+  },
+  "homepage": "https://github.com/walterwang0x01/lark-kiro-bridge#readme",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  }
 }
