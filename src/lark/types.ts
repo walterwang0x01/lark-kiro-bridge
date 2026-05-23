@@ -28,3 +28,27 @@ export interface IncomingMessage {
   /** 收到事件的时间戳（毫秒） */
   receivedAt: number;
 }
+
+/**
+ * 卡片按钮回调事件（业务层格式）
+ *
+ * 用户点击卡片上的 button（behaviors:[{type:'callback'}]) 时，飞书会推一个
+ * card.action.trigger 事件，dispatch 到这里。
+ */
+export interface CardActionEvent {
+  /** 触发事件的 message_id（即卡片所在那条消息的 id） */
+  messageId: string;
+  /** chat id */
+  chatId: string;
+  /** 操作者的 open_id */
+  senderOpenId: string;
+  /**
+   * 按钮 value 字段——业务层自定义结构。
+   * 我们约定每个按钮都带 { action: 'model.set' | 'ws.use' | ..., ... }。
+   */
+  value: Record<string, unknown>;
+  /** 飞书发的 token（可用于在 30 分钟内更新原卡片，最多 2 次。当前未用，留给未来） */
+  token?: string;
+  /** 触发时间戳 */
+  receivedAt: number;
+}

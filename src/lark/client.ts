@@ -2,15 +2,16 @@
  * 飞书 SDK 封装
  *
  * 提供两个能力：
- *   1. WebSocket 长连接事件监听（订阅 im.message.receive_v1）
+ *   1. WebSocket 长连接事件监听（订阅 im.message.receive_v1 + card.action.trigger）
  *   2. 飞书 OpenAPI 调用：发消息、发卡片、更新卡片、查机器人 open_id
  *
- * 与业务层之间通过 onMessage 回调解耦。
+ * 与业务层之间通过 onMessage / onCardAction 回调解耦。
  */
 import * as lark from '@larksuiteoapi/node-sdk';
 import type { Logger } from 'pino';
 import { parseIncomingMessage } from './parse.js';
-import type { IncomingMessage } from './types.js';
+import { parseCardAction } from './cardAction.js';
+import type { IncomingMessage, CardActionEvent } from './types.js';
 
 export interface LarkClientOptions {
   appId: string;
@@ -38,10 +39,13 @@ export class LarkClient {
   }
 
   /**
-   * 启动 WebSocket 长连接，注册 im.message.receive_v1 事件 handler。
+   * 启动 WebSocket 长连接，注册事件 handler：
+   *   - im.message.receive_v1：用户发的消息
+   *   - card.action.trigger：用户点了卡片上的按钮
    */
   async startEventLoop(handlers: {
     onMessage: (msg: IncomingMessage) => void | Promise<void>;
+    onCardAction?: (evt: CardActionEvent) => void | Promise<void>;
     onReady?: () => void;
     onReconnected?: () => void;
   }): Promise<void> {
@@ -65,11 +69,15 @@ export class LarkClient {
       },
     });
 
+    // EventDispatcher 的 register 接受任意 event 名 → handler 的 map
     const dispatcher = new lark.EventDispatcher({}).register({
       'im.message.receive_v1': async (data) => {
+        // 关键：立刻返回 ack 给飞书；实际处理放后台。
+        // 飞书事件订阅是 at-least-once，handler 不在几秒内返回会触发重推，
+        // 而 Kiro 跑一次往往要 5–60 秒，必须异步处理。
         try {
           const msg = parseIncomingMessage(data as Parameters<typeof parseIncomingMessage>[0]);
-          this.log.debug(
+          this.log.info(
             {
               event: 'enter',
               eventId: msg.eventId,
@@ -80,9 +88,40 @@ export class LarkClient {
             },
             'incoming message',
           );
-          await handlers.onMessage(msg);
+          // 异步 fire-and-forget；onMessage 内部已经做 try/catch 不会泄露异常
+          Promise.resolve(handlers.onMessage(msg)).catch((e) => {
+            this.log.error({ err: e }, 'onMessage handler threw');
+          });
         } catch (e) {
-          this.log.error({ err: e }, 'onMessage handler threw');
+          this.log.error({ err: e }, 'event parse failed');
+        }
+        return { code: 0 };
+      },
+      'card.action.trigger': async (data: unknown) => {
+        // 用户点了卡片按钮。同样 ack 立返、异步处理。
+        try {
+          const evt = parseCardAction(data);
+          if (!evt) {
+            this.log.debug({ raw: data }, 'card.action.trigger: cannot parse, skip');
+            return { code: 0 };
+          }
+          this.log.info(
+            {
+              event: 'card-action',
+              messageId: evt.messageId,
+              chatId: evt.chatId,
+              senderId: evt.senderOpenId,
+              valueKeys: Object.keys(evt.value),
+            },
+            'card action',
+          );
+          if (handlers.onCardAction) {
+            Promise.resolve(handlers.onCardAction(evt)).catch((e) => {
+              this.log.error({ err: e }, 'onCardAction handler threw');
+            });
+          }
+        } catch (e) {
+          this.log.error({ err: e }, 'card action parse failed');
         }
         return { code: 0 };
       },
