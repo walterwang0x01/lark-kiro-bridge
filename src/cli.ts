@@ -108,21 +108,36 @@ program
   });
 
 const service = program.command('service').description('Manage background daemon (launchd)');
-service.command('install').description('Install launchd plist').action(async () => {
-  await serviceInstall();
-});
-service.command('uninstall').description('Remove launchd plist').action(async () => {
-  await serviceUninstall();
-});
-service.command('start').description('Start the daemon').action(async () => {
-  await serviceStart();
-});
-service.command('stop').description('Stop the daemon').action(async () => {
-  await serviceStop();
-});
-service.command('status').description('Show daemon status').action(async () => {
-  await serviceStatus();
-});
+service
+  .command('install')
+  .description('Install launchd plist')
+  .action(async () => {
+    await serviceInstall();
+  });
+service
+  .command('uninstall')
+  .description('Remove launchd plist')
+  .action(async () => {
+    await serviceUninstall();
+  });
+service
+  .command('start')
+  .description('Start the daemon')
+  .action(async () => {
+    await serviceStart();
+  });
+service
+  .command('stop')
+  .description('Stop the daemon')
+  .action(async () => {
+    await serviceStop();
+  });
+service
+  .command('status')
+  .description('Show daemon status')
+  .action(async () => {
+    await serviceStatus();
+  });
 
 // 顶级别名（业界惯例：start/stop/restart/status 直接顶在 CLI 上）
 program

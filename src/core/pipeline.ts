@@ -21,7 +21,10 @@ export class ChatPipeline {
   private currentTaskId: string | null = null;
   private currentPromise: Promise<void> | null = null;
 
-  constructor(public readonly chatId: string, logger: Logger) {
+  constructor(
+    public readonly chatId: string,
+    logger: Logger,
+  ) {
     this.log = logger.child({ module: 'pipeline', chatId });
   }
 

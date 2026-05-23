@@ -25,10 +25,12 @@ export const ConfigSchema = z.object({
   kiro: z
     .object({
       binPath: z.string().default('kiro-cli'),
-      trustedTools: z
-        .array(z.string())
-        .default(['fs_read', 'fs_write', 'grep', 'glob', 'code']),
-      timeoutMs: z.number().int().positive().default(10 * 60 * 1000),
+      trustedTools: z.array(z.string()).default(['fs_read', 'fs_write', 'grep', 'glob', 'code']),
+      timeoutMs: z
+        .number()
+        .int()
+        .positive()
+        .default(10 * 60 * 1000),
       /**
        * 默认 idle watchdog（分钟）。0 = 关闭。
        * stdout 连续这么久没新输出就当作 kiro-cli 假死，killTree。
@@ -42,9 +44,7 @@ export const ConfigSchema = z.object({
   workspace: z
     .object({
       defaultCwd: z.string().default('/Users/administrator/PycharmProjects'),
-      allowedRoots: z
-        .array(z.string())
-        .default(['/Users/administrator/PycharmProjects']),
+      allowedRoots: z.array(z.string()).default(['/Users/administrator/PycharmProjects']),
     })
     .default({}),
   access: z

@@ -43,7 +43,10 @@ async function resolveBinPath(): Promise<{ program: string; args: string[] }> {
   const fileUrl = new URL(import.meta.url).pathname;
   // dist/cli.js 或 dist/cli.mjs 的位置；从 launchd.js 推 ../bin/lark-kiro-bridge.mjs 不一定对，
   // 直接指向 dist 同级 cli 入口最稳。但 launchd 推荐绝对路径全局安装。
-  const guess = fileUrl.replace(/\/(dist|src)\/daemon\/launchd\.[mc]?js$/, '/bin/lark-kiro-bridge.mjs');
+  const guess = fileUrl.replace(
+    /\/(dist|src)\/daemon\/launchd\.[mc]?js$/,
+    '/bin/lark-kiro-bridge.mjs',
+  );
   return { program: node, args: [guess, 'run'] };
 }
 
@@ -141,7 +144,9 @@ export async function serviceStatus(): Promise<void> {
       /^\s*(state|pid|last exit code|program|stdout|stderr)/i.test(l),
     );
     console.log(`Status: ${LABEL}`);
-    interesting.forEach((l) => console.log(`  ${l.trim()}`));
+    interesting.forEach((l) => {
+      console.log(`  ${l.trim()}`);
+    });
   } else {
     console.log(`Service ${LABEL} not loaded.`);
   }

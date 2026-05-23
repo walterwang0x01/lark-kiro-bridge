@@ -108,7 +108,10 @@ export class Dispatcher {
 
     // 2) 访问控制
     if (!isUserAllowed(msg.senderOpenId, msg.chatId, this.config)) {
-      this.log.debug({ user: msg.senderOpenId, chat: msg.chatId }, 'message dropped by access control');
+      this.log.debug(
+        { user: msg.senderOpenId, chat: msg.chatId },
+        'message dropped by access control',
+      );
       return;
     }
 
@@ -117,8 +120,10 @@ export class Dispatcher {
       if (this.config.preferences.requireMentionInGroup) {
         // 暂时还没拿到 botOpenId 的话先放过（避免漏消息）；后续 setBotOpenId 后会生效
         // 简化逻辑：mentions 不为空且没人提到 bot → 跳过
-        const botMentioned = msg.mentions.some((m) =>
-          (m.name ?? '').toLowerCase().includes('kiro') || (m.name ?? '').toLowerCase().includes('bot'),
+        const botMentioned = msg.mentions.some(
+          (m) =>
+            (m.name ?? '').toLowerCase().includes('kiro') ||
+            (m.name ?? '').toLowerCase().includes('bot'),
         );
         if (!botMentioned && msg.mentions.length > 0) {
           this.log.debug('group message without @bot, ignored');
@@ -133,9 +138,7 @@ export class Dispatcher {
 
     // 4) 仅支持 text/post 消息；image/file/audio 走媒体下载
     const supportedMedia =
-      msg.messageType === 'image' ||
-      msg.messageType === 'file' ||
-      msg.messageType === 'audio';
+      msg.messageType === 'image' || msg.messageType === 'file' || msg.messageType === 'audio';
     if (msg.messageType !== 'text' && msg.messageType !== 'post' && !supportedMedia) {
       await this.sendInteractiveCard(
         msg,
@@ -278,9 +281,7 @@ export class Dispatcher {
               buildAckCard({
                 state: 'done',
                 title: '📁 目录已切换',
-                body: wsName
-                  ? `\`${abs}\`\n🗂️ 工作区：\`${wsName}\``
-                  : `\`${abs}\``,
+                body: wsName ? `\`${abs}\`\n🗂️ 工作区：\`${wsName}\`` : `\`${abs}\``,
               }),
             );
           } catch (e) {
@@ -352,9 +353,7 @@ export class Dispatcher {
             buildAckCard({
               state: ok ? 'done' : 'error',
               title: ok ? '🗑️ 工作区已删除' : '❌ 工作区不存在',
-              body: ok
-                ? `已删除 \`${cmd.name}\``
-                : `没有名为 \`${cmd.name}\` 的工作区`,
+              body: ok ? `已删除 \`${cmd.name}\`` : `没有名为 \`${cmd.name}\` 的工作区`,
             }),
           );
           return;
@@ -410,7 +409,13 @@ export class Dispatcher {
     }
 
     // 7) 普通消息 / 未知命令 → 跑 Kiro
-    await this.runKiroTask(msg, cleanText, session.currentCwd, mediaPaths, session.idleTimeoutMinutes);
+    await this.runKiroTask(
+      msg,
+      cleanText,
+      session.currentCwd,
+      mediaPaths,
+      session.idleTimeoutMinutes,
+    );
   }
 
   private async workspaceNameOf(cwd: string): Promise<string | undefined> {
@@ -534,7 +539,7 @@ export class Dispatcher {
   private async handleModelCmd(
     msg: IncomingMessage,
     cmd: Extract<ParsedCommand, { kind: 'model' }>,
-    cwd: string,
+    _cwd: string, // 当前未使用；保留参数签名一致性，后续可能用于 per-chat 模型覆盖
   ): Promise<void> {
     if (cmd.mode === 'show') {
       // 先发占位，再异步取列表 + patch
@@ -581,14 +586,14 @@ export class Dispatcher {
       async () => {
         const list = await listModels(this.config.kiro.binPath);
         const target = this.resolveModelName(cmd.name, list);
-          if (list && target === undefined) {
-            const valid = list.models.map((m) => `\`${m.name}\``).join('、');
-            return buildAckCard({
-              state: 'error',
-              title: '❌ 模型不存在',
-              body: `没有名为 \`${cmd.name}\` 的模型。\n\n可用：${valid}\n\n用 \`/model\` 查看完整列表。`,
-            });
-          }
+        if (list && target === undefined) {
+          const valid = list.models.map((m) => `\`${m.name}\``).join('、');
+          return buildAckCard({
+            state: 'error',
+            title: '❌ 模型不存在',
+            body: `没有名为 \`${cmd.name}\` 的模型。\n\n可用：${valid}\n\n用 \`/model\` 查看完整列表。`,
+          });
+        }
         const finalName = target ?? cmd.name;
         this.config = patchAndSaveConfig(this.config, (draft) => {
           draft.kiro.model = finalName;
@@ -751,10 +756,7 @@ export class Dispatcher {
         const list = await listModels(this.config.kiro.binPath);
         const current = this.config.kiro.model ?? list?.defaultModel ?? 'auto';
         if (!list) {
-          await this.sendCardToChat(
-            evt.chatId,
-            buildAckCard({ state: 'error', body: '刷新失败' }),
-          );
+          await this.sendCardToChat(evt.chatId, buildAckCard({ state: 'error', body: '刷新失败' }));
           return;
         }
         await this.sendCardToChat(evt.chatId, buildModelPickerCard({ current, list }));
@@ -872,10 +874,7 @@ export class Dispatcher {
           );
         } catch (e) {
           const m = e instanceof SecurityError ? e.message : String((e as Error).message);
-          await this.sendCardToChat(
-            evt.chatId,
-            buildAckCard({ state: 'error', body: m }),
-          );
+          await this.sendCardToChat(evt.chatId, buildAckCard({ state: 'error', body: m }));
         }
         return;
       }
@@ -892,27 +891,6 @@ export class Dispatcher {
       action === 'ws.use' ||
       action === 'session.new'
     );
-  }
-
-  private async replyDoneCard(
-    msg: IncomingMessage,
-    body: string,
-    cwd: string,
-    wsName?: string,
-  ): Promise<void> {
-    const ctx: CardContext = { cwd };
-    if (wsName !== undefined) ctx.workspaceName = wsName;
-    const renderer = new CardRenderer({
-      lark: this.lark,
-      chatId: msg.chatId,
-      replyToMessageId: msg.messageId,
-      intervalMs: this.config.preferences.cardUpdateIntervalMs,
-      logger: this.log,
-      ctx,
-    });
-    await renderer.open('done', body);
-    // 立即终止（done 卡片不需要流式）
-    await renderer.finalize('done', body);
   }
 
   private async replyErrorCard(msg: IncomingMessage, body: string, cwd: string): Promise<void> {
@@ -995,7 +973,7 @@ export class Dispatcher {
         if (this.config.kiro.model !== undefined) runOpts.model = this.config.kiro.model;
         if (this.config.kiro.agent !== undefined) runOpts.agent = this.config.kiro.agent;
 
-        let result;
+        let result: Awaited<ReturnType<typeof runKiro>>;
         try {
           result = await runKiro(runOpts);
         } catch (e) {
@@ -1007,17 +985,13 @@ export class Dispatcher {
         }
 
         if (result.aborted) {
-          await renderer.finalize(
-            'aborted',
-            result.text || "<font color='grey'>任务被打断</font>",
-          );
+          await renderer.finalize('aborted', result.text || "<font color='grey'>任务被打断</font>");
           return;
         }
         if (result.idleTimedOut) {
           await renderer.finalize(
             'timedout',
-            (result.text || '') +
-              `\n\n<font color='grey'>${idleMin} 分钟无响应，已自动终止</font>`,
+            (result.text || '') + `\n\n<font color='grey'>${idleMin} 分钟无响应，已自动终止</font>`,
           );
           return;
         }
@@ -1047,10 +1021,7 @@ export class Dispatcher {
             sessionStatus: `↪️ ${result.newSessionId.slice(0, 8)}`,
           });
         }
-        await renderer.finalize(
-          'done',
-          result.text || "<font color='grey'>（无回复）</font>",
-        );
+        await renderer.finalize('done', result.text || "<font color='grey'>（无回复）</font>");
       },
     });
   }

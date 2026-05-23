@@ -60,12 +60,7 @@ export class CardRenderer {
   async open(initialState: CardState = 'pending', initialText = ''): Promise<void> {
     this.currentState = initialState;
     this.accText = initialText;
-    const card = buildCard(
-      initialState,
-      truncateForCard(this.accText),
-      this.ctx,
-      this.traces,
-    );
+    const card = buildCard(initialState, truncateForCard(this.accText), this.ctx, this.traces);
     if (this.replyToMessageId) {
       this.messageId = await this.lark.replyCard(this.replyToMessageId, card);
     } else {
@@ -103,12 +98,7 @@ export class CardRenderer {
   /** 把当前累积状态立即 patch 到飞书。 */
   private async flush(): Promise<void> {
     if (!this.messageId || this.closed) return;
-    const card = buildCard(
-      this.currentState,
-      truncateForCard(this.accText),
-      this.ctx,
-      this.traces,
-    );
+    const card = buildCard(this.currentState, truncateForCard(this.accText), this.ctx, this.traces);
     try {
       await this.lark.patchCard(this.messageId, card);
     } catch (e) {
@@ -136,12 +126,7 @@ export class CardRenderer {
       }
       return;
     }
-    const card = buildCard(
-      state,
-      truncateForCard(this.accText),
-      this.ctx,
-      this.traces,
-    );
+    const card = buildCard(state, truncateForCard(this.accText), this.ctx, this.traces);
     try {
       await this.lark.patchCard(this.messageId, card);
     } catch (e) {

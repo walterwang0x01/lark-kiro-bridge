@@ -37,6 +37,7 @@ interface AudioContent {
 
 /** 文件名清洗：去掉路径分隔符和危险字符，超过 80 字符截断（保留扩展名） */
 function sanitizeFilename(name: string, fallbackKey: string, defaultExt: string): string {
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping NUL and C0 control chars from filenames is intentional
   let s = name.replace(/[/\\\x00-\x1f]/g, '_').trim();
   if (!s) s = fallbackKey + defaultExt;
   if (s.length > 80) {
@@ -78,21 +79,43 @@ export async function downloadMessageMedia(
     const c = parsed as ImageContent;
     if (c.image_key) {
       const filename = sanitizeFilename('', `${ts}-${c.image_key.slice(0, 8)}`, '.jpg');
-      const path = await fetchResource(lark, msg.messageId, c.image_key, 'image', chatPath(msg.chatId, filename));
+      const path = await fetchResource(
+        lark,
+        msg.messageId,
+        c.image_key,
+        'image',
+        chatPath(msg.chatId, filename),
+      );
       if (path) out.push(path);
     }
   } else if (msg.messageType === 'file') {
     const c = parsed as FileContent;
     if (c.file_key) {
-      const filename = sanitizeFilename(c.file_name ?? '', `${ts}-${c.file_key.slice(0, 8)}`, '.bin');
-      const path = await fetchResource(lark, msg.messageId, c.file_key, 'file', chatPath(msg.chatId, filename));
+      const filename = sanitizeFilename(
+        c.file_name ?? '',
+        `${ts}-${c.file_key.slice(0, 8)}`,
+        '.bin',
+      );
+      const path = await fetchResource(
+        lark,
+        msg.messageId,
+        c.file_key,
+        'file',
+        chatPath(msg.chatId, filename),
+      );
       if (path) out.push(path);
     }
   } else if (msg.messageType === 'audio') {
     const c = parsed as AudioContent;
     if (c.file_key) {
       const filename = sanitizeFilename('', `${ts}-${c.file_key.slice(0, 8)}`, '.opus');
-      const path = await fetchResource(lark, msg.messageId, c.file_key, 'file', chatPath(msg.chatId, filename));
+      const path = await fetchResource(
+        lark,
+        msg.messageId,
+        c.file_key,
+        'file',
+        chatPath(msg.chatId, filename),
+      );
       if (path) out.push(path);
     }
   }
@@ -159,7 +182,7 @@ export function pruneOldMedia(retainHours = 24): void {
   try {
     for (const chat of readdirSync(MEDIA_DIR)) {
       const chatDir = join(MEDIA_DIR, chat);
-      let dirSt;
+      let dirSt: ReturnType<typeof statSync>;
       try {
         dirSt = statSync(chatDir);
       } catch {

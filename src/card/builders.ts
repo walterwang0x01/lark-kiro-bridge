@@ -144,10 +144,7 @@ function columnSet(opts: ColumnSetOpts): object {
  *   - 行间距压到 small (4px)，13 个模型时折叠后视觉占位 ~200px（vs 全展开 600px）
  *   - 名字短化（去 claude- 前缀），第三列直接显示 "/m xxx" 命令
  */
-export function buildModelPickerCard(opts: {
-  current: string;
-  list: ModelListResult;
-}): object {
+export function buildModelPickerCard(opts: { current: string; list: ModelListResult }): object {
   const { current, list } = opts;
   const groups = groupModels(list.models);
   const elements: object[] = [];
@@ -163,9 +160,7 @@ export function buildModelPickerCard(opts: {
           : `${m.contextWindow}`;
     const rateLabel = `${m.rateMultiplier}×`;
     const shortName = m.name.replace(/^claude-/, '');
-    const namePart = isCurrent
-      ? `**✓ ${shortName}**`
-      : `\u3000${shortName}`;
+    const namePart = isCurrent ? `**✓ ${shortName}**` : `\u3000${shortName}`;
     return columnSet({
       flexMode: 'none',
       horizontalSpacing: 'small',
@@ -173,9 +168,7 @@ export function buildModelPickerCard(opts: {
         column({ weight: 5, elements: [md(namePart)] }),
         column({
           weight: 3,
-          elements: [
-            md(`<font color='grey'>${rateLabel} · ${ctxLabel}</font>`, 'right'),
-          ],
+          elements: [md(`<font color='grey'>${rateLabel} · ${ctxLabel}</font>`, 'right')],
         }),
         column({
           weight: 2,
@@ -309,11 +302,7 @@ function groupModels(models: ModelInfo[]): {
       continue;
     }
     // claude 系列：sonnet-4.6 / opus-4.6 / haiku-4.5 是当前主力，其余视作 legacy
-    if (
-      name === 'claude-sonnet-4.6' ||
-      name === 'claude-opus-4.6' ||
-      name === 'claude-haiku-4.5'
-    ) {
+    if (name === 'claude-sonnet-4.6' || name === 'claude-opus-4.6' || name === 'claude-haiku-4.5') {
       recommended.push(m);
       continue;
     }
@@ -487,18 +476,11 @@ export function buildWorkspaceListCard(opts: {
         columns: [
           column({
             weight: 3,
-            elements: [
-              md(isCurrent ? `**✓ ${name}**` : `\u3000${name}`),
-            ],
+            elements: [md(isCurrent ? `**✓ ${name}**` : `\u3000${name}`)],
           }),
           column({
             weight: 4,
-            elements: [
-              md(
-                `<font color='grey'>${shortPath}</font>`,
-                'right',
-              ),
-            ],
+            elements: [md(`<font color='grey'>${shortPath}</font>`, 'right')],
           }),
           column({
             weight: 2,
@@ -522,9 +504,7 @@ export function buildWorkspaceListCard(opts: {
 
   elements.push(hr());
   elements.push(
-    md(
-      '<font color="grey">💡 用 `/ws save <name>` 添加，`/ws remove <name>` 删除。</font>',
-    ),
+    md('<font color="grey">💡 用 `/ws save <name>` 添加，`/ws remove <name>` 删除。</font>'),
   );
   return {
     schema: '2.0',
@@ -571,14 +551,10 @@ export function buildStatusCard(opts: {
   elements.push(
     row(
       'Kiro session',
-      opts.kiroSessionId
-        ? `↪️ \`${opts.kiroSessionId.slice(0, 8)}…\``
-        : '_未建立，下条消息会新建_',
+      opts.kiroSessionId ? `↪️ \`${opts.kiroSessionId.slice(0, 8)}…\`` : '_未建立，下条消息会新建_',
     ),
   );
-  elements.push(
-    row('任务状态', opts.hasActiveTask ? '🟢 进行中' : '⚪ 空闲'),
-  );
+  elements.push(row('任务状态', opts.hasActiveTask ? '🟢 进行中' : '⚪ 空闲'));
   elements.push(
     row(
       'Idle watchdog',

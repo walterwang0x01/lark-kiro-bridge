@@ -47,7 +47,7 @@ const CACHE_TTL_MS = 5 * 60 * 1000;
 export async function listModels(binPath = 'kiro-cli'): Promise<ModelListResult | undefined> {
   if (cache && Date.now() - cache.at < CACHE_TTL_MS) return cache.data;
 
-  let r;
+  let r: Awaited<ReturnType<typeof execa>>;
   try {
     r = await execa(binPath, ['chat', '--list-models', '--format', 'json'], {
       reject: false,
@@ -78,7 +78,10 @@ export async function listModels(binPath = 'kiro-cli'): Promise<ModelListResult 
   try {
     parsed = JSON.parse(text) as RawListModelsResp;
   } catch (e) {
-    log().warn({ err: (e as Error).message, sample: text.slice(0, 200) }, 'list-models json parse failed');
+    log().warn(
+      { err: (e as Error).message, sample: text.slice(0, 200) },
+      'list-models json parse failed',
+    );
     return undefined;
   }
   if (!Array.isArray(parsed.models)) return undefined;

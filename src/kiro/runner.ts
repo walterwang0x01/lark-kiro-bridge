@@ -19,6 +19,7 @@ const log = () => getLogger().child({ module: 'kiro-runner' });
 
 /** ANSI 转义序列剥离正则；覆盖 CSI、OSC 和常见控制序列。 */
 // eslint-disable-next-line no-control-regex
+// biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escapes require explicit \x1B / \x07
 const ANSI_REGEX = /\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1B\\)|[ -/]*[0-9?])/g;
 
 export function stripAnsi(input: string): string {

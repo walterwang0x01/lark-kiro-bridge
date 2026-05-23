@@ -58,8 +58,9 @@ export async function runBridge(): Promise<RunBridgeHandle> {
   const sessions = new SessionStore();
   const workspaces = new WorkspaceStore();
 
-  // 引用持有：reconnect 时要先 close 再 startEventLoop
-  let larkRef = lark;
+  // 当前实现里 lark 实例不会被替换（reconnect 复用同一实例），所以是 const。
+  // 如果未来需要在 reconnect 时换新实例（比如换 appId），把这里改成 let 即可。
+  const larkRef = lark;
 
   const startEventLoop = async (): Promise<void> => {
     await larkRef.startEventLoop({

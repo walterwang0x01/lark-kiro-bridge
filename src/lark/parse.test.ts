@@ -109,9 +109,7 @@ describe('parseIncomingMessage', () => {
     });
 
     it('returns empty string for invalid JSON', () => {
-      const m = parseIncomingMessage(
-        makeRawEvent({ messageType: 'text', content: 'not-json' }),
-      );
+      const m = parseIncomingMessage(makeRawEvent({ messageType: 'text', content: 'not-json' }));
       expect(m.text).toBe('');
     });
 
@@ -157,9 +155,7 @@ describe('parseIncomingMessage', () => {
     });
 
     it('returns empty when content missing', () => {
-      const m = parseIncomingMessage(
-        makeRawEvent({ messageType: 'post', content: '{}' }),
-      );
+      const m = parseIncomingMessage(makeRawEvent({ messageType: 'post', content: '{}' }));
       expect(m.text).toBe('');
     });
   });
