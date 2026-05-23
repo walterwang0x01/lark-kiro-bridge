@@ -2,14 +2,16 @@
  * 流式卡片渲染器
  *
  * 一次任务一个 CardRenderer。生命周期：
- *   open() → 发出"⏳ 正在思考..."的初始卡片，记下 messageId
- *   appendText(chunk) → 累积文本，节流后 patchCard 更新（streaming 状态）
+ *   open() → 发出"⏳ 思考中"的初始卡片，记下 messageId
+ *   appendText(chunk) → 累积"真正回复"文本，节流后 patchCard 更新
+ *   appendTrace(line) → 累积"工具调用 trace"，跟正文分开存
  *   finalize(state) → 切到终态（done/aborted/timedout/error），刷新一次
  *
- * 节流策略：
- *   - 收到 chunk 不立刻更新；触发 debounce 计时，
- *     在 cardUpdateIntervalMs 内合并所有 chunk 一次 patch
- *   - finalize 时立即 flush，再单独发一次终态 patch
+ * 设计要点：
+ *   - 区分 body（LLM 真正回复）和 traces（工具调用摘要）：
+ *     传给 buildCard 时 trace 放折叠面板，不混入正文
+ *   - debounce 节流：cardUpdateIntervalMs 内合并所有更新一次 patch
+ *   - finalize 时立即取消 debounce，立刻发终态
  */
 import type { Logger } from 'pino';
 import type { LarkClient } from '../lark/client.js';
@@ -36,7 +38,10 @@ export class CardRenderer {
   private ctx: CardContext;
 
   private messageId: string | null = null;
+  /** LLM 的真正回复文本（去掉 trace） */
   private accText = '';
+  /** 工具调用 trace 摘要（按出现顺序） */
+  private traces: string[] = [];
   private currentState: CardState = 'pending';
   private closed = false;
 
@@ -55,7 +60,12 @@ export class CardRenderer {
   async open(initialState: CardState = 'pending', initialText = ''): Promise<void> {
     this.currentState = initialState;
     this.accText = initialText;
-    const card = buildCard(initialState, truncateForCard(this.accText), this.ctx, true);
+    const card = buildCard(
+      initialState,
+      truncateForCard(this.accText),
+      this.ctx,
+      this.traces,
+    );
     if (this.replyToMessageId) {
       this.messageId = await this.lark.replyCard(this.replyToMessageId, card);
     } else {
@@ -64,7 +74,7 @@ export class CardRenderer {
     this.log.debug({ messageId: this.messageId, state: initialState }, 'card opened');
   }
 
-  /** 流式追加文本，触发节流更新。 */
+  /** 追加正文文本（LLM 真正的回复），触发节流更新。 */
   appendText(chunk: string): void {
     if (this.closed) return;
     this.accText += chunk;
@@ -76,14 +86,28 @@ export class CardRenderer {
     });
   }
 
-  /** 把累积的文本立即 patch 到飞书。 */
+  /** 追加一条工具调用 trace 摘要（如 "📖 读取 SKILL.md"）。 */
+  appendTrace(line: string): void {
+    if (this.closed) return;
+    const trimmed = line.trim();
+    if (!trimmed) return;
+    this.traces.push(trimmed);
+    if (this.currentState === 'pending') {
+      this.currentState = 'streaming';
+    }
+    this.debouncer.schedule(async () => {
+      await this.flush();
+    });
+  }
+
+  /** 把当前累积状态立即 patch 到飞书。 */
   private async flush(): Promise<void> {
     if (!this.messageId || this.closed) return;
     const card = buildCard(
       this.currentState,
       truncateForCard(this.accText),
       this.ctx,
-      this.currentState === 'pending' || this.currentState === 'streaming',
+      this.traces,
     );
     try {
       await this.lark.patchCard(this.messageId, card);
@@ -100,7 +124,6 @@ export class CardRenderer {
   async finalize(state: CardState, finalText?: string): Promise<void> {
     if (this.closed) return;
     this.closed = true;
-    // 把 debouncer 里残留的 schedule 取消，由我们直接发终态
     this.debouncer.cancel();
     if (finalText !== undefined) this.accText = finalText;
     this.currentState = state;
@@ -113,7 +136,12 @@ export class CardRenderer {
       }
       return;
     }
-    const card = buildCard(state, truncateForCard(this.accText), this.ctx, false);
+    const card = buildCard(
+      state,
+      truncateForCard(this.accText),
+      this.ctx,
+      this.traces,
+    );
     try {
       await this.lark.patchCard(this.messageId, card);
     } catch (e) {
