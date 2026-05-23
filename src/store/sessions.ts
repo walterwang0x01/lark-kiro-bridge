@@ -21,6 +21,13 @@ const ChatSessionSchema = z.object({
   currentCwd: z.string(),
   sessionsByCwd: z.record(z.string(), z.string()).default({}),
   lastActiveAt: z.number().int().nonnegative().default(0),
+  /**
+   * per-chat idle watchdog 分钟数覆盖：
+   *   undefined → 用全局默认（preferences/kiro.idleTimeoutMinutes）
+   *   0         → 显式关闭
+   *   N>0       → 用 N 分钟
+   */
+  idleTimeoutMinutes: z.number().int().nonnegative().optional(),
 });
 
 const SessionsFileSchema = z.object({
@@ -152,6 +159,37 @@ export class SessionStore {
     return withLock(() => {
       const data = readFile();
       return data.chats[chatId]?.sessionsByCwd[cwd];
+    });
+  }
+
+  /**
+   * 设置 chat 的 idle watchdog 阈值（分钟）。
+   *   - undefined：清除覆盖，回归全局默认
+   *   - 0：关闭
+   *   - N>0：用 N 分钟
+   */
+  async setIdleTimeout(
+    chatId: string,
+    minutes: number | undefined,
+    defaultCwd: string,
+  ): Promise<void> {
+    await withLock(() => {
+      const data = readFile();
+      const session =
+        data.chats[chatId] ??
+        ({
+          currentCwd: defaultCwd,
+          sessionsByCwd: {},
+          lastActiveAt: Date.now(),
+        } as ChatSession);
+      if (minutes === undefined) {
+        delete session.idleTimeoutMinutes;
+      } else {
+        session.idleTimeoutMinutes = minutes;
+      }
+      session.lastActiveAt = Date.now();
+      data.chats[chatId] = session;
+      writeFile(data);
     });
   }
 }

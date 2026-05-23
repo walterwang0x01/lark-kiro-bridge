@@ -29,6 +29,12 @@ export const ConfigSchema = z.object({
         .array(z.string())
         .default(['fs_read', 'fs_write', 'grep', 'glob', 'code']),
       timeoutMs: z.number().int().positive().default(10 * 60 * 1000),
+      /**
+       * 默认 idle watchdog（分钟）。0 = 关闭。
+       * stdout 连续这么久没新输出就当作 kiro-cli 假死，killTree。
+       * /timeout N 可以临时为某个 chat 覆盖。
+       */
+      idleTimeoutMinutes: z.number().int().nonnegative().default(5),
       model: z.string().optional(),
       agent: z.string().optional(),
     })
@@ -52,6 +58,8 @@ export const ConfigSchema = z.object({
     .object({
       requireMentionInGroup: z.boolean().default(true),
       cardUpdateIntervalMs: z.number().int().positive().default(800),
+      /** 启动时清理多少天之前的日志文件 */
+      logRetentionDays: z.number().int().positive().default(7),
     })
     .default({}),
 });
@@ -100,6 +108,21 @@ export function saveConfig(cfg: Config): void {
   ensureDataDirs();
   writeFileSync(CONFIG_FILE, JSON.stringify(cfg, null, 2) + '\n', { mode: 0o600 });
   chmodSync(CONFIG_FILE, 0o600);
+}
+
+/**
+ * 把内存里的 Config 应用一个 patch 后落盘。
+ * 调用方用 mutator 直接改字段（推荐 immutable 风格：返回新对象也行）。
+ *
+ * 实现细节：写之前 deep-clone，避免外部 mutator 把传入的 cfg 改坏；
+ * 写完用 ConfigSchema 再 parse 一遍兜底，防止 patch 写出非法值。
+ */
+export function patchAndSaveConfig(cfg: Config, mutator: (draft: Config) => void): Config {
+  const draft = JSON.parse(JSON.stringify(cfg)) as Config;
+  mutator(draft);
+  const validated = ConfigSchema.parse(draft);
+  saveConfig(validated);
+  return validated;
 }
 
 /**
