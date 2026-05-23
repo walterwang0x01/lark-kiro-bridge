@@ -10,7 +10,7 @@
 import { Command } from 'commander';
 import { createInterface } from 'node:readline/promises';
 import { existsSync } from 'node:fs';
-import { CONFIG_FILE, ensureDataDirs } from './lib/paths.js';
+import { CONFIG_FILE, ensureDataDirs, LOGS_DIR } from './lib/paths.js';
 import { defaultConfig, loadConfig, saveConfig } from './lib/config.js';
 import { runBridge } from './core/bootstrap.js';
 import { getLogger } from './lib/logger.js';
@@ -21,6 +21,7 @@ import {
   serviceInstall,
   serviceUninstall,
 } from './daemon/launchd.js';
+import { listProcesses, findProcess } from './daemon/registry.js';
 
 const program = new Command();
 
@@ -122,6 +123,101 @@ service.command('stop').description('Stop the daemon').action(async () => {
 service.command('status').description('Show daemon status').action(async () => {
   await serviceStatus();
 });
+
+// 顶级别名（业界惯例：start/stop/restart/status 直接顶在 CLI 上）
+program
+  .command('start')
+  .description('Install (if needed) and start the background daemon')
+  .action(async () => {
+    await serviceInstall().catch((e) => {
+      // 已存在 plist 也无所谓
+      console.error(`(install) ${(e as Error).message}`);
+    });
+    await serviceStart();
+  });
+
+program
+  .command('stop')
+  .description('Stop the background daemon')
+  .action(async () => {
+    await serviceStop();
+  });
+
+program
+  .command('restart')
+  .description('Restart the background daemon in place')
+  .action(async () => {
+    await serviceStop().catch(() => undefined);
+    // 等 launchd 彻底 bootout，避免 bootstrap 时撞上"already loaded"
+    await new Promise((r) => setTimeout(r, 1500));
+    await serviceStart();
+  });
+
+program
+  .command('status')
+  .description('Show daemon status (alias of `service status`)')
+  .action(async () => {
+    await serviceStatus();
+  });
+
+program
+  .command('unregister')
+  .description('Remove daemon plist and stop')
+  .action(async () => {
+    await serviceUninstall();
+  });
+
+program
+  .command('ps')
+  .description('List all running bridge processes on this host')
+  .action(async () => {
+    const list = await listProcesses();
+    if (list.length === 0) {
+      console.log('No running bridge processes.');
+      console.log(`Logs: ${LOGS_DIR}/`);
+      return;
+    }
+    console.log(`#  PID     SHORT   APP_ID                STARTED              CWD`);
+    list.forEach((p, i) => {
+      const started = new Date(p.startedAt).toISOString().replace('T', ' ').slice(0, 19);
+      const num = String(i + 1).padEnd(2);
+      const pid = String(p.pid).padEnd(7);
+      const sh = p.shortId.padEnd(7);
+      const app = p.appId.padEnd(20).slice(0, 20);
+      console.log(`${num} ${pid} ${sh} ${app}  ${started}  ${p.cwd}`);
+    });
+    console.log(`\nLogs: ${LOGS_DIR}/`);
+  });
+
+program
+  .command('kill <id>')
+  .description('Kill a bridge process by pid / shortId / #N')
+  .option('--force', 'Send SIGKILL after 2s if still alive')
+  .action(async (id: string, opts: { force?: boolean }) => {
+    const target = await findProcess(id);
+    if (!target) {
+      console.error(`No bridge process matches "${id}". Use \`ps\` to list.`);
+      process.exit(1);
+    }
+    try {
+      process.kill(target.pid, 'SIGTERM');
+      console.log(`✅ SIGTERM sent to pid ${target.pid} (shortId ${target.shortId})`);
+    } catch (e) {
+      console.error(`Failed to signal pid ${target.pid}: ${(e as Error).message}`);
+      process.exit(1);
+    }
+    if (opts.force) {
+      await new Promise((r) => setTimeout(r, 2000));
+      try {
+        process.kill(target.pid, 0);
+        // 还活着
+        process.kill(target.pid, 'SIGKILL');
+        console.log(`✅ SIGKILL sent to pid ${target.pid}`);
+      } catch {
+        // 已死
+      }
+    }
+  });
 
 // 兜底未知命令
 program.parseAsync(process.argv).catch((e) => {

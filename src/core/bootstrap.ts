@@ -6,11 +6,13 @@
  * 然后等 SIGINT/SIGTERM 来收尾。
  */
 import { loadConfig } from '../lib/config.js';
-import { getLogger } from '../lib/logger.js';
+import { getLogger, pruneOldLogs } from '../lib/logger.js';
 import { LarkClient } from '../lark/client.js';
+import { pruneOldMedia } from '../lark/media.js';
 import { SessionStore } from '../store/sessions.js';
 import { WorkspaceStore } from '../store/workspaces.js';
 import { Dispatcher } from './dispatcher.js';
+import { registerSelf, unregisterSelf, listProcesses } from '../daemon/registry.js';
 
 export interface RunBridgeHandle {
   /** 主动停止；返回 promise 在所有清理完成后 resolve */
@@ -26,9 +28,27 @@ export async function runBridge(): Promise<RunBridgeHandle> {
       defaultCwd: config.workspace.defaultCwd,
       allowedRoots: config.workspace.allowedRoots,
       trustedTools: config.kiro.trustedTools,
+      idleTimeoutMinutes: config.kiro.idleTimeoutMinutes,
     },
     'lark-kiro-bridge starting',
   );
+
+  // 启动清理：日志（覆盖 logger 里的默认 7 天） + 24h 前的媒体
+  pruneOldLogs(config.preferences.logRetentionDays);
+  pruneOldMedia(24);
+
+  // 同 app 多实例检测
+  const others = (await listProcesses()).filter(
+    (p) => p.appId === config.lark.appId && p.pid !== process.pid,
+  );
+  if (others.length > 0) {
+    log.warn(
+      { others: others.map((p) => ({ pid: p.pid, shortId: p.shortId })) },
+      'another bridge process is running with the same appId; Lark events may be routed randomly between them',
+    );
+  }
+
+  await registerSelf(config.lark.appId);
 
   const lark = new LarkClient({
     appId: config.lark.appId,
@@ -37,19 +57,50 @@ export async function runBridge(): Promise<RunBridgeHandle> {
   });
   const sessions = new SessionStore();
   const workspaces = new WorkspaceStore();
-  const dispatcher = new Dispatcher({ config, lark, sessions, workspaces, logger: log });
 
-  await lark.startEventLoop({
-    onMessage: (msg) => dispatcher.handle(msg),
-    onReady: () => log.info('🚀 lark-kiro-bridge ready, waiting for messages'),
+  // 引用持有：reconnect 时要先 close 再 startEventLoop
+  let larkRef = lark;
+
+  const startEventLoop = async (): Promise<void> => {
+    await larkRef.startEventLoop({
+      onMessage: (msg) => dispatcher.handle(msg),
+      onCardAction: (evt) => dispatcher.handleCardAction(evt),
+      onReady: () => log.info('🚀 lark-kiro-bridge ready, waiting for messages'),
+    });
+  };
+
+  const dispatcher = new Dispatcher({
+    config,
+    lark,
+    sessions,
+    workspaces,
+    logger: log,
+    onReconnect: async () => {
+      log.info('reconnect requested via /reconnect');
+      try {
+        larkRef.close();
+      } catch (e) {
+        log.warn({ err: e }, 'close before reconnect failed (ignored)');
+      }
+      // 等一拍再起，避免 SDK 内部状态没清干净
+      await new Promise((r) => setTimeout(r, 500));
+      await startEventLoop();
+    },
   });
+
+  await startEventLoop();
 
   let stopped = false;
   const stop = async () => {
     if (stopped) return;
     stopped = true;
     log.info('shutting down');
-    lark.close();
+    try {
+      larkRef.close();
+    } catch {
+      // ignore
+    }
+    await unregisterSelf().catch(() => undefined);
   };
 
   // 注册信号处理（CLI 入口也会注册，这里冗余一次保险）
