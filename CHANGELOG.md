@@ -7,6 +7,27 @@
 
 待发版的改动会先写在这里。
 
+## [0.5.0] — 2026-05-24
+
+### 新增（Added）
+
+- **`/steering` 飞书内管理 Kiro 指令文件**：在飞书里列出 / 查看 / 编辑 / 新建 / 删除 `.kiro/steering/*.md`，无需打开 IDE
+  - `list`：列出当前 scope 所有 steering 文件，每行展示 inclusion 策略（always / manual / fileMatch）+ 大小 + 操作按钮
+  - `view <name>`：展示文件内容；超过 3000 字符自动截短并提示用本地编辑器
+  - `edit <name>`：飞书表单（multi-line input，最大 5000 字符）直接改，提交即生效
+  - `new <name>`：弹空白表单创建新文件；点列表底部「📝 新建」按钮也行
+  - `rm <name>`：带二次确认的删除按钮
+  - `--global` / `-g`：操作 `~/.kiro/steering/`（默认 project scope = 当前 cwd 下的 `.kiro/steering/`）
+  - 别名：`/memory` `/mem`
+- 安全校验：文件名只允许字母数字 + `. _ -`、强制 `.md` 后缀、禁止路径穿越（`../`）；内容大小上限 100KB
+- admin only 写操作（list/view 只读，所有人可用）
+- 新增 `src/memory/store.ts` + 24 个单元测试覆盖文件名校验、CRUD、frontmatter 解析
+
+### 变更（Changed）
+
+- help 卡片和 help 文本加入 `/steering` 命令说明
+- 命令解析支持 `--global` / `-g` 参数和子命令灵活顺序（`/steering edit --global foo.md` 和 `/steering --global edit foo.md` 都能解析）
+
 ## [0.4.0] — 2026-05-24
 
 ### 新增（Added）
@@ -144,7 +165,8 @@
 - 飞书免费版租户不支持 ASR，语音输入在路线图
 - 群里 `@all` 永不响应（设计行为）
 
-[Unreleased]: https://github.com/walterwang0x01/lark-kiro-bridge/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/walterwang0x01/lark-kiro-bridge/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/walterwang0x01/lark-kiro-bridge/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/walterwang0x01/lark-kiro-bridge/compare/v0.3.1...v0.4.0
 [0.3.0]: https://github.com/walterwang0x01/lark-kiro-bridge/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/walterwang0x01/lark-kiro-bridge/compare/v0.1.0...v0.2.0

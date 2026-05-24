@@ -363,6 +363,91 @@ describe('parseCommand', () => {
     });
   });
 
+  describe('/steering（memory 管理）', () => {
+    it('/steering 默认 list project', () => {
+      expect(parseCommand('/steering')).toEqual({ kind: 'memory', mode: 'list', scope: 'project' });
+    });
+    it('/memory 是别名', () => {
+      expect(parseCommand('/memory')).toEqual({ kind: 'memory', mode: 'list', scope: 'project' });
+    });
+    it('/mem 是别名', () => {
+      expect(parseCommand('/mem')).toEqual({ kind: 'memory', mode: 'list', scope: 'project' });
+    });
+    it('/steering --global', () => {
+      expect(parseCommand('/steering --global')).toEqual({
+        kind: 'memory',
+        mode: 'list',
+        scope: 'global',
+      });
+    });
+    it('/steering -g 短参', () => {
+      expect(parseCommand('/steering -g')).toEqual({
+        kind: 'memory',
+        mode: 'list',
+        scope: 'global',
+      });
+    });
+    it('/steering view <name>', () => {
+      expect(parseCommand('/steering view foo.md')).toEqual({
+        kind: 'memory',
+        mode: 'view',
+        scope: 'project',
+        name: 'foo.md',
+      });
+    });
+    it('/steering <name> 无子命令直接 view', () => {
+      expect(parseCommand('/steering foo.md')).toEqual({
+        kind: 'memory',
+        mode: 'view',
+        scope: 'project',
+        name: 'foo.md',
+      });
+    });
+    it('/steering edit <name>', () => {
+      expect(parseCommand('/steering edit foo.md')).toEqual({
+        kind: 'memory',
+        mode: 'edit',
+        scope: 'project',
+        name: 'foo.md',
+      });
+    });
+    it('/steering new <name>', () => {
+      expect(parseCommand('/steering new bar.md')).toEqual({
+        kind: 'memory',
+        mode: 'new',
+        scope: 'project',
+        name: 'bar.md',
+      });
+    });
+    it('/steering rm <name>', () => {
+      expect(parseCommand('/steering rm baz.md')).toEqual({
+        kind: 'memory',
+        mode: 'rm',
+        scope: 'project',
+        name: 'baz.md',
+      });
+    });
+    it('/steering edit --global <name>（顺序灵活）', () => {
+      expect(parseCommand('/steering edit --global foo.md')).toEqual({
+        kind: 'memory',
+        mode: 'edit',
+        scope: 'global',
+        name: 'foo.md',
+      });
+    });
+    it('/steering --global edit <name>', () => {
+      expect(parseCommand('/steering --global edit foo.md')).toEqual({
+        kind: 'memory',
+        mode: 'edit',
+        scope: 'global',
+        name: 'foo.md',
+      });
+    });
+    it('/steering edit 没参数 → unknown', () => {
+      expect(parseCommand('/steering edit')).toEqual({ kind: 'unknown', raw: '/steering edit' });
+    });
+  });
+
   describe('kiro-internal 拦截', () => {
     it('/agent 拦截', () => {
       expect(parseCommand('/agent')).toEqual({ kind: 'kiro-internal', name: 'agent' });

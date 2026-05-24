@@ -59,6 +59,7 @@
 - 🔘 **按钮可点** — `/model` `/help` `/status` `/ws list` `/config` 全部可点击操作，0 命令记忆
 - 📝 **`/config` 飞书内表单** — 在飞书里改访问控制和偏好，即时生效，防自锁校验
 - 🚄 **rapid-fire 消息合并** — 200ms 内连发的多条短消息自动合并为一次 Kiro 调用，不再被前一条 abort
+- 🧠 **`/steering` 飞书内管理 Kiro 指令文件** — list/view/edit/new/rm，全局或项目 scope，飞书表单直接改，永久生效
 - 🎤 **语音输入** — 飞书发语音消息 → 自动转写（飞书 ASR）→ 喂给 Kiro，需 `ffmpeg` 和 ASR 权限
 - 🛡️ **进程组 kill** — `detached: true` + `process.kill(-pid)` 杀掉 kiro-cli 全部子孙
 - ⏱ **Idle Watchdog** — 卡住自动 killTree，可全局 / per-chat 配置
@@ -142,6 +143,7 @@ lark-kiro-bridge restart        # 重启
 | `/ws list` | — | 列出命名工作区，按钮一键切 |
 | `/timeout [N\|off]` | `/to` | idle watchdog 阈值（分钟） |
 | `/ps` | — | 列出本机所有 bridge 进程 |
+| `/steering` | `/memory` `/mem` | 列出当前项目的 Kiro 指令文件（卡片+按钮） |
 | `/doctor [描述]` | — | 让 Kiro 看日志自诊断 |
 
 ### 管理员命令
@@ -153,6 +155,7 @@ lark-kiro-bridge restart        # 重启
 | `/ws save <name>` | 把当前 cwd 存为命名工作区 |
 | `/ws use <name>` | 切到命名工作区 |
 | `/ws remove <name>` | 删除命名工作区 |
+| `/steering edit/new/rm <name>` | 编辑 / 新建 / 删除 steering 文件 |
 | `/exit <id\|#>` | 停止指定 bridge 进程（自己 / 他人） |
 | `/reconnect` | 强制重连飞书 WebSocket |
 
@@ -296,7 +299,8 @@ node bin/lark-kiro-bridge.mjs run           # 本地跑（先 stop daemon）
 - **v0.2** ✅ 当前版（结构化卡片 + 按钮回调 + Slack-style 工具面板 + 扫码绑定 + 语音输入 ASR）
 - **v0.3** ✅ `/config` 飞书内表单 + 三层访问控制（DM 豁免群白名单）+ rapid-fire 消息合并
 - **v0.4** ✅ Linux systemd / Windows Task Scheduler 守护 + `/ps` `/exit` 飞书内进程管理
-- **v0.5** 群名 → 工作区的启发式默认（进 agenzo 群默认在 agenzo 目录）
+- **v0.5** ✅ `/steering` 飞书内管理 Kiro 指令文件（list/view/edit/new/rm，global/project scope）
+- **v0.6** `/cron` 定时任务 — 自然语言或 cron 表达式设定，"每天 6 点总结 trending"
 - **v1.0** 服务器集中部署 / 多用户隔离 / Web 管理面板
 
 ## 📄 License

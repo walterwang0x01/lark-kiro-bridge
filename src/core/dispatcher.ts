@@ -36,9 +36,20 @@ import {
   buildConfigViewCard,
   buildConfigFormCard,
   buildPsCard,
+  buildMemoryListCard,
+  buildMemoryViewCard,
+  buildMemoryEditFormCard,
+  buildMemoryNewFormCard,
 } from '../card/builders.js';
 import { ChatPipeline } from './pipeline.js';
 import { listProcesses, findProcess } from '../daemon/registry.js';
+import {
+  MemoryStore,
+  MemoryError,
+  validateFilename,
+  normalizeFilename,
+  extractInclusion,
+} from '../memory/store.js';
 import {
   isUserAllowed,
   isAdmin,
@@ -65,6 +76,7 @@ export class Dispatcher {
   private readonly log: Logger;
   private readonly pipelines = new Map<string, ChatPipeline>();
   private readonly onReconnect?: () => Promise<void>;
+  private readonly memory = new MemoryStore();
 
   constructor(opts: DispatcherOptions) {
     this.config = opts.config;
@@ -288,6 +300,9 @@ export class Dispatcher {
         case 'config':
         case 'exit':
           return true;
+        case 'memory':
+          // list / view 只读，不要 admin；edit/new/rm 要
+          return cmd.mode === 'edit' || cmd.mode === 'new' || cmd.mode === 'rm';
         default:
           return false;
       }
@@ -489,6 +504,10 @@ export class Dispatcher {
         }
         case 'exit': {
           await this.handleExitCmd(msg, cmd.target);
+          return;
+        }
+        case 'memory': {
+          await this.handleMemoryCmd(msg, cmd, session.currentCwd);
           return;
         }
         case 'kiro-internal': {
@@ -1047,6 +1066,104 @@ export class Dispatcher {
         }
         return;
       }
+      case 'steering.list': {
+        const scope = (evt.value['scope'] === 'global' ? 'global' : 'project') as
+          | 'global'
+          | 'project';
+        await this.sendCardToChat(
+          evt.chatId,
+          this.buildSteeringListCard(scope, session.currentCwd, evt.senderOpenId),
+        );
+        return;
+      }
+      case 'steering.view': {
+        const scope = (evt.value['scope'] === 'global' ? 'global' : 'project') as
+          | 'global'
+          | 'project';
+        const name = String(evt.value['name'] ?? '');
+        try {
+          const content = this.memory.get(scope, session.currentCwd, name);
+          await this.sendCardToChat(
+            evt.chatId,
+            buildMemoryViewCard({
+              scope,
+              name,
+              content,
+              isAdmin: isAdmin(evt.senderOpenId, this.config),
+            }),
+          );
+        } catch (e) {
+          const m = e instanceof MemoryError ? e.message : (e as Error).message;
+          await this.sendCardToChat(evt.chatId, buildAckCard({ state: 'error', body: m }));
+        }
+        return;
+      }
+      case 'steering.edit': {
+        const scope = (evt.value['scope'] === 'global' ? 'global' : 'project') as
+          | 'global'
+          | 'project';
+        const name = String(evt.value['name'] ?? '');
+        try {
+          const content = this.memory.get(scope, session.currentCwd, name);
+          if (content.length > 5000) {
+            await this.sendCardToChat(
+              evt.chatId,
+              buildAckCard({
+                state: 'error',
+                title: '⚠️ 文件过大',
+                body: `\`${name}\` 超过 5000 字符，飞书表单不支持。请用本地编辑器打开：\n\`${scope === 'global' ? '~/.kiro/steering/' : '.kiro/steering/'}${name}\``,
+              }),
+            );
+            return;
+          }
+          await this.sendCardToChat(
+            evt.chatId,
+            buildMemoryEditFormCard({ scope, name, content, isNew: false }),
+          );
+        } catch (e) {
+          const m = e instanceof MemoryError ? e.message : (e as Error).message;
+          await this.sendCardToChat(evt.chatId, buildAckCard({ state: 'error', body: m }));
+        }
+        return;
+      }
+      case 'steering.newPrompt': {
+        const scope = (evt.value['scope'] === 'global' ? 'global' : 'project') as
+          | 'global'
+          | 'project';
+        await this.sendCardToChat(evt.chatId, buildMemoryNewFormCard({ scope }));
+        return;
+      }
+      case 'steering.rm': {
+        const scope = (evt.value['scope'] === 'global' ? 'global' : 'project') as
+          | 'global'
+          | 'project';
+        const name = String(evt.value['name'] ?? '');
+        try {
+          const ok = this.memory.delete(scope, session.currentCwd, name);
+          await this.sendCardToChat(
+            evt.chatId,
+            buildAckCard({
+              state: ok ? 'done' : 'error',
+              body: ok ? `已删除 \`${name}\`` : `\`${name}\` 不存在`,
+            }),
+          );
+          // 删完顺便刷新列表
+          if (ok) {
+            await this.sendCardToChat(
+              evt.chatId,
+              this.buildSteeringListCard(scope, session.currentCwd, evt.senderOpenId),
+            );
+          }
+        } catch (e) {
+          const m = e instanceof MemoryError ? e.message : (e as Error).message;
+          await this.sendCardToChat(evt.chatId, buildAckCard({ state: 'error', body: m }));
+        }
+        return;
+      }
+      case 'steering.submit': {
+        await this.handleSteeringSubmit(evt, session.currentCwd);
+        return;
+      }
       default:
         this.log.debug({ action }, 'unknown card action, ignored');
     }
@@ -1061,7 +1178,11 @@ export class Dispatcher {
       action === 'session.new' ||
       action === 'config.edit' ||
       action === 'config.submit' ||
-      action === 'process.stop'
+      action === 'process.stop' ||
+      action === 'steering.edit' ||
+      action === 'steering.rm' ||
+      action === 'steering.newPrompt' ||
+      action === 'steering.submit'
     );
   }
 
@@ -1226,6 +1347,237 @@ export class Dispatcher {
           body: `无法向 pid \`${proc.pid}\` 发信号：${(e as Error).message}`,
         }),
       );
+    }
+  }
+
+  /**
+   * /steering（memory）命令统一入口。
+   *
+   * 子命令：
+   *   - list / 无参数      → 列出当前 scope 的 steering 文件
+   *   - view <name>        → 看具体内容
+   *   - edit <name>        → 弹表单编辑（admin）
+   *   - new <name>         → 新建（带初始名）（admin）
+   *   - rm <name>          → 删除（admin）
+   *
+   * scope 通过 cmd.scope（global / project，默认 project）控制。
+   */
+  private async handleMemoryCmd(
+    msg: IncomingMessage,
+    cmd: Extract<ParsedCommand, { kind: 'memory' }>,
+    cwd: string,
+  ): Promise<void> {
+    if (cmd.mode === 'list') {
+      await this.sendInteractiveCard(
+        msg,
+        this.buildSteeringListCard(cmd.scope, cwd, msg.senderOpenId),
+      );
+      return;
+    }
+    const normName = normalizeFilename(cmd.name);
+    if (cmd.mode === 'view') {
+      const validErrors = validateFilename(normName);
+      if (validErrors.length > 0) {
+        await this.sendInteractiveCard(
+          msg,
+          buildAckCard({
+            state: 'error',
+            title: '❌ 文件名非法',
+            body: validErrors.join('\n'),
+          }),
+        );
+        return;
+      }
+      try {
+        const content = this.memory.get(cmd.scope, cwd, normName);
+        await this.sendInteractiveCard(
+          msg,
+          buildMemoryViewCard({
+            scope: cmd.scope,
+            name: normName,
+            content,
+            isAdmin: isAdmin(msg.senderOpenId, this.config),
+          }),
+        );
+      } catch (e) {
+        const m = e instanceof MemoryError ? e.message : (e as Error).message;
+        await this.sendInteractiveCard(msg, buildAckCard({ state: 'error', body: m }));
+      }
+      return;
+    }
+    if (cmd.mode === 'edit') {
+      const validErrors = validateFilename(normName);
+      if (validErrors.length > 0) {
+        await this.sendInteractiveCard(
+          msg,
+          buildAckCard({ state: 'error', body: validErrors.join('\n') }),
+        );
+        return;
+      }
+      try {
+        const content = this.memory.get(cmd.scope, cwd, normName);
+        if (content.length > 5000) {
+          await this.sendInteractiveCard(
+            msg,
+            buildAckCard({
+              state: 'error',
+              title: '⚠️ 文件过大',
+              body: `\`${normName}\` 超过 5000 字符，飞书表单不支持。请用本地编辑器编辑。`,
+            }),
+          );
+          return;
+        }
+        await this.sendInteractiveCard(
+          msg,
+          buildMemoryEditFormCard({ scope: cmd.scope, name: normName, content, isNew: false }),
+        );
+      } catch (e) {
+        const m = e instanceof MemoryError ? e.message : (e as Error).message;
+        await this.sendInteractiveCard(msg, buildAckCard({ state: 'error', body: m }));
+      }
+      return;
+    }
+    if (cmd.mode === 'new') {
+      const validErrors = validateFilename(normName);
+      if (validErrors.length > 0) {
+        await this.sendInteractiveCard(
+          msg,
+          buildAckCard({
+            state: 'error',
+            title: '❌ 文件名非法',
+            body: validErrors.join('\n'),
+          }),
+        );
+        return;
+      }
+      // 新建场景：name 已知，弹空白编辑表单
+      await this.sendInteractiveCard(
+        msg,
+        buildMemoryEditFormCard({ scope: cmd.scope, name: normName, content: '', isNew: true }),
+      );
+      return;
+    }
+    if (cmd.mode === 'rm') {
+      const validErrors = validateFilename(normName);
+      if (validErrors.length > 0) {
+        await this.sendInteractiveCard(
+          msg,
+          buildAckCard({ state: 'error', body: validErrors.join('\n') }),
+        );
+        return;
+      }
+      try {
+        const ok = this.memory.delete(cmd.scope, cwd, normName);
+        await this.sendInteractiveCard(
+          msg,
+          buildAckCard({
+            state: ok ? 'done' : 'error',
+            body: ok ? `已删除 \`${normName}\`` : `\`${normName}\` 不存在`,
+          }),
+        );
+      } catch (e) {
+        const m = e instanceof MemoryError ? e.message : (e as Error).message;
+        await this.sendInteractiveCard(msg, buildAckCard({ state: 'error', body: m }));
+      }
+      return;
+    }
+  }
+
+  /**
+   * 构造 steering 列表卡片（带 inclusion frontmatter 解析）。
+   * 抽出来给命令入口和按钮回调共用。
+   */
+  private buildSteeringListCard(
+    scope: 'global' | 'project',
+    cwd: string,
+    senderOpenId: string,
+  ): object {
+    const files = this.memory.list(scope, cwd);
+    const enriched = files.map((f) => {
+      let inclusion = 'always';
+      try {
+        const c = this.memory.get(scope, cwd, f.name);
+        inclusion = extractInclusion(c);
+      } catch {
+        // ignore
+      }
+      return { name: f.name, inclusion, size: f.size };
+    });
+    return buildMemoryListCard({
+      scope,
+      cwd,
+      files: enriched,
+      isAdmin: isAdmin(senderOpenId, this.config),
+    });
+  }
+
+  /**
+   * 处理 steering 表单提交。
+   *
+   * 三种来源：
+   *   1. 编辑现有文件（value.name 有值，isNew=false）→ form_value 只有 content
+   *   2. /steering new <name> 命令进入的编辑（value.name 有值，isNew=true）→ form_value 只有 content
+   *   3. 点「📝 新建」按钮的入口表单（value.name 无值，isNew=true）→ form_value 含 name + content
+   */
+  private async handleSteeringSubmit(evt: CardActionEvent, cwd: string): Promise<void> {
+    const fv = evt.formValue ?? {};
+    const scope = (evt.value['scope'] === 'global' ? 'global' : 'project') as 'global' | 'project';
+    const isNew = evt.value['isNew'] === true;
+
+    // 决定文件名：value 里有就用 value，否则从表单 name 字段取
+    let name = String(evt.value['name'] ?? '').trim();
+    if (!name && typeof fv['name'] === 'string') {
+      name = normalizeFilename(String(fv['name']));
+    }
+    if (!name) {
+      await this.sendCardToChat(
+        evt.chatId,
+        buildAckCard({ state: 'error', body: '❌ 缺少文件名' }),
+      );
+      return;
+    }
+    const validErrors = validateFilename(name);
+    if (validErrors.length > 0) {
+      await this.sendCardToChat(
+        evt.chatId,
+        buildAckCard({
+          state: 'error',
+          title: '❌ 文件名非法',
+          body: validErrors.join('\n'),
+        }),
+      );
+      return;
+    }
+
+    const content = String(fv['content'] ?? '');
+    try {
+      this.memory.save(scope, cwd, name, content);
+      this.log.info(
+        {
+          scope,
+          name,
+          size: content.length,
+          isNew,
+          by: evt.senderOpenId,
+        },
+        'steering saved',
+      );
+      await this.sendCardToChat(
+        evt.chatId,
+        buildAckCard({
+          state: 'done',
+          title: isNew ? '✅ 已创建' : '✅ 已保存',
+          body: `\`${name}\`（${scope === 'global' ? '全局' : '项目'}），下次 Kiro 启动时生效。`,
+        }),
+      );
+      // 刷新列表卡片
+      await this.sendCardToChat(
+        evt.chatId,
+        this.buildSteeringListCard(scope, cwd, evt.senderOpenId),
+      );
+    } catch (e) {
+      const m = e instanceof MemoryError ? e.message : (e as Error).message;
+      await this.sendCardToChat(evt.chatId, buildAckCard({ state: 'error', body: m }));
     }
   }
 

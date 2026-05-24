@@ -59,6 +59,7 @@
 - 🔘 **Clickable buttons** — `/model` `/help` `/status` `/ws list` `/config` are all interactive cards, zero command memorization
 - 📝 **`/config` in-Feishu form** — Edit access control & preferences inside Feishu, takes effect instantly, anti-lockout validation
 - 🚄 **Rapid-fire message merging** — Multiple short messages within 200ms merge into a single Kiro call, no more abort-and-retry
+- 🧠 **`/steering` to manage Kiro instruction files in Feishu** — list/view/edit/new/rm, global or project scope, edit via in-Feishu form, persists permanently
 - 🎤 **Voice input** — Send a voice message in Feishu → auto-transcribed (Feishu ASR) → fed to Kiro. Requires `ffmpeg` and ASR scope.
 - 🛡️ **Process group kill** — `detached: true` + `process.kill(-pid)` reaches kiro-cli's grandchildren
 - ⏱ **Idle watchdog** — Stuck process auto-killed; tunable globally and per-chat
@@ -142,6 +143,7 @@ Platform mapping:
 | `/ws list` | — | List named workspaces with switch buttons |
 | `/timeout [N\|off]` | `/to` | Idle watchdog threshold (minutes) |
 | `/ps` | — | List all bridge processes on this host |
+| `/steering` | `/memory` `/mem` | List Kiro steering files for current project (card + buttons) |
 | `/doctor [desc]` | — | Let Kiro inspect logs and diagnose |
 
 ### Admin commands
@@ -153,6 +155,7 @@ Platform mapping:
 | `/ws save <name>` | Save current cwd as a named workspace |
 | `/ws use <name>` | Switch to a named workspace |
 | `/ws remove <name>` | Delete a named workspace |
+| `/steering edit/new/rm <name>` | Edit / create / delete a steering file |
 | `/exit <id\|#>` | Stop a bridge process (self / others) |
 | `/reconnect` | Force reconnect Feishu WebSocket |
 
@@ -298,7 +301,8 @@ Conventions: TypeScript strict / Biome lint / vitest tests / conventional commit
 - **v0.2** ✅ Current (structured cards + button callbacks + Slack-style tool panels + QR app binding + voice input via ASR)
 - **v0.3** ✅ In-Feishu `/config` form + three-tier access control (DM bypass) + rapid-fire message merging
 - **v0.4** ✅ Linux systemd / Windows Task Scheduler daemon + `/ps` `/exit` in-Feishu process management
-- **v0.5** Group-name → workspace heuristic (joining "agenzo" group defaults cwd to agenzo dir)
+- **v0.5** ✅ `/steering` to manage Kiro instruction files in Feishu (list/view/edit/new/rm, global/project scope)
+- **v0.6** `/cron` scheduled tasks — natural-language or cron-expression schedules, e.g. "every day 6am summarize trending"
 - **v1.0** Centralized server deployment / multi-user isolation / web admin panel
 
 ## 📄 License

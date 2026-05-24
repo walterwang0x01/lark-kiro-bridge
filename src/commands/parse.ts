@@ -43,6 +43,11 @@ export type ParsedCommand =
   | { kind: 'config'; mode: 'show' }
   | { kind: 'ps' }
   | { kind: 'exit'; target: string }
+  | { kind: 'memory'; mode: 'list'; scope: 'global' | 'project' }
+  | { kind: 'memory'; mode: 'view'; scope: 'global' | 'project'; name: string }
+  | { kind: 'memory'; mode: 'edit'; scope: 'global' | 'project'; name: string }
+  | { kind: 'memory'; mode: 'new'; scope: 'global' | 'project'; name: string }
+  | { kind: 'memory'; mode: 'rm'; scope: 'global' | 'project'; name: string }
   | { kind: 'model'; mode: 'show' }
   | { kind: 'model'; mode: 'set'; name: string }
   | { kind: 'model'; mode: 'reset' }
@@ -146,6 +151,66 @@ export function parseCommand(text: string): ParsedCommand | null {
     case 'kill': {
       if (!tail) return { kind: 'unknown', raw: trimmed };
       return { kind: 'exit', target: tail };
+    }
+    case 'steering':
+    case 'memory':
+    case 'mem': {
+      // 解析 [--global] [子命令] [文件名]
+      // 支持顺序：/steering [--global] [list|view|edit|new|rm] [name]
+      const tokens = tail.split(/\s+/).filter(Boolean);
+      let scope: 'global' | 'project' = 'project';
+      const remaining: string[] = [];
+      for (const t of tokens) {
+        if (t === '--global' || t === '-g') {
+          scope = 'global';
+        } else {
+          remaining.push(t);
+        }
+      }
+      // 没有子命令 → list
+      if (remaining.length === 0) {
+        return { kind: 'memory', mode: 'list', scope };
+      }
+      const sub = remaining[0]?.toLowerCase() ?? '';
+      const arg = remaining.slice(1).join(' ').trim();
+      // /steering <name>（无子命令）→ 视作 view（看内容）
+      if (
+        sub !== 'list' &&
+        sub !== 'view' &&
+        sub !== 'cat' &&
+        sub !== 'show' &&
+        sub !== 'edit' &&
+        sub !== 'new' &&
+        sub !== 'create' &&
+        sub !== 'rm' &&
+        sub !== 'remove' &&
+        sub !== 'delete'
+      ) {
+        return { kind: 'memory', mode: 'view', scope, name: remaining.join(' ') };
+      }
+      switch (sub) {
+        case 'list':
+          return { kind: 'memory', mode: 'list', scope };
+        case 'view':
+        case 'cat':
+        case 'show':
+          if (!arg) return { kind: 'unknown', raw: trimmed };
+          return { kind: 'memory', mode: 'view', scope, name: arg };
+        case 'edit':
+          if (!arg) return { kind: 'unknown', raw: trimmed };
+          return { kind: 'memory', mode: 'edit', scope, name: arg };
+        case 'new':
+        case 'create':
+          if (!arg) return { kind: 'unknown', raw: trimmed };
+          return { kind: 'memory', mode: 'new', scope, name: arg };
+        case 'rm':
+        case 'remove':
+        case 'delete':
+          if (!arg) return { kind: 'unknown', raw: trimmed };
+          return { kind: 'memory', mode: 'rm', scope, name: arg };
+        default:
+          return { kind: 'unknown', raw: trimmed };
+      }
     }
     case 'model': {
       if (!tail) return { kind: 'model', mode: 'show' };

@@ -376,6 +376,7 @@ export function buildHelpCard(): object {
     collapsed('展开：运维', [
       ['/timeout [N|off]', 'idle watchdog 阈值'],
       ['/config', '查看 / 编辑访问控制 + 偏好（管理员）'],
+      ['/steering', '管理 Kiro steering（指令文件）'],
       ['/ps', '列出本机所有 bridge 进程'],
       ['/exit <id>', '停止指定进程（管理员）'],
       ['/reconnect', '重连飞书 WebSocket'],
@@ -1019,6 +1020,453 @@ export function buildPsCard(opts: {
       subtitle: `${processes.length} 个`,
     }),
     body: { elements },
+  };
+}
+
+// ----- /steering（memory）卡片 -----
+
+/**
+ * /steering list 卡片：列出当前 scope 的所有 steering 文件。
+ *
+ * 视觉策略：
+ *   - 每行：文件名 + inclusion + 大小 + [查看][编辑][删除] 按钮
+ *   - header 显示 scope（global / project）
+ *   - 底部一个「📝 新建」按钮
+ */
+export function buildMemoryListCard(opts: {
+  scope: 'global' | 'project';
+  cwd: string;
+  files: Array<{ name: string; inclusion: string; size: number }>;
+  isAdmin: boolean;
+}): object {
+  const elements: object[] = [];
+  const scopeLabel =
+    opts.scope === 'global' ? '全局（~/.kiro/steering/）' : `项目（${opts.cwd}/.kiro/steering/）`;
+  elements.push(md(`<font color='grey'>位置：${scopeLabel}</font>`));
+
+  if (opts.files.length === 0) {
+    elements.push(
+      md(
+        `_这里还没有 steering 文件。_\n\n点 **📝 新建** 添加，或在终端 \`echo '...' > ${opts.scope === 'global' ? '~/.kiro/steering/foo.md' : '.kiro/steering/foo.md'}\` 创建。`,
+      ),
+    );
+  } else {
+    for (const f of opts.files) {
+      const inclusionTag =
+        f.inclusion === 'always'
+          ? `<font color='green'>always</font>`
+          : f.inclusion === 'manual'
+            ? `<font color='grey'>manual</font>`
+            : `<font color='orange'>${f.inclusion}</font>`;
+      const sizeStr = f.size < 1024 ? `${f.size}B` : `${(f.size / 1024).toFixed(1)}KB`;
+      elements.push(
+        columnSet({
+          flexMode: 'none',
+          horizontalSpacing: 'small',
+          columns: [
+            column({
+              weight: 5,
+              elements: [
+                md(`\`${f.name}\` · ${inclusionTag} · <font color='grey'>${sizeStr}</font>`),
+              ],
+            }),
+            column({
+              weight: 2,
+              vAlign: 'center',
+              elements: [
+                btn({
+                  text: '查看',
+                  type: 'default',
+                  size: 'tiny',
+                  value: { action: 'steering.view', scope: opts.scope, name: f.name },
+                }),
+              ],
+            }),
+            ...(opts.isAdmin
+              ? [
+                  column({
+                    weight: 2,
+                    vAlign: 'center',
+                    elements: [
+                      btn({
+                        text: '编辑',
+                        type: 'primary',
+                        size: 'tiny',
+                        value: { action: 'steering.edit', scope: opts.scope, name: f.name },
+                      }),
+                    ],
+                  }),
+                  column({
+                    weight: 2,
+                    vAlign: 'center',
+                    elements: [
+                      btn({
+                        text: '删除',
+                        type: 'danger',
+                        size: 'tiny',
+                        value: { action: 'steering.rm', scope: opts.scope, name: f.name },
+                        confirm: {
+                          title: '删除 steering 文件',
+                          text: `确认删除 ${f.name}？此操作不可撤销。`,
+                        },
+                      }),
+                    ],
+                  }),
+                ]
+              : []),
+          ],
+        }),
+      );
+    }
+  }
+
+  elements.push(hr());
+  // 底部操作栏
+  const footerCols: object[] = [];
+  // scope 切换按钮
+  footerCols.push(
+    column({
+      width: 'auto',
+      elements: [
+        btn({
+          text: opts.scope === 'global' ? '↩ 切到项目' : '🌐 切到全局',
+          type: 'default',
+          size: 'tiny',
+          value: {
+            action: 'steering.list',
+            scope: opts.scope === 'global' ? 'project' : 'global',
+          },
+        }),
+      ],
+    }),
+  );
+  if (opts.isAdmin) {
+    footerCols.push(
+      column({
+        width: 'auto',
+        elements: [
+          btn({
+            text: '📝 新建',
+            type: 'primary',
+            size: 'tiny',
+            value: { action: 'steering.newPrompt', scope: opts.scope },
+          }),
+        ],
+      }),
+    );
+  }
+  footerCols.push(
+    column({
+      width: 'auto',
+      elements: [
+        btn({
+          text: '🔄 刷新',
+          type: 'default',
+          size: 'tiny',
+          value: { action: 'steering.list', scope: opts.scope },
+        }),
+      ],
+    }),
+  );
+  elements.push(columnSet({ flexMode: 'flow', horizontalSpacing: 'small', columns: footerCols }));
+
+  return {
+    schema: '2.0',
+    header: buildHeader({
+      title: '🧠 Kiro Steering',
+      template: 'wathet',
+      subtitle: opts.scope === 'global' ? '全局' : '项目级',
+    }),
+    body: { elements },
+  };
+}
+
+/**
+ * /steering view 卡片：展示某个 steering 文件的内容。
+ *
+ * 设计：
+ *   - 用 markdown code block 展示原始内容
+ *   - 太长（>3000 字符）截短并提示
+ *   - admin 看到「编辑」按钮
+ */
+export function buildMemoryViewCard(opts: {
+  scope: 'global' | 'project';
+  name: string;
+  content: string;
+  isAdmin: boolean;
+}): object {
+  const elements: object[] = [];
+  const MAX_VIEW = 3000;
+  const truncated = opts.content.length > MAX_VIEW;
+  const shown = truncated ? opts.content.slice(0, MAX_VIEW) + '\n\n... [已截短]' : opts.content;
+
+  elements.push(md(`\`\`\`markdown\n${shown}\n\`\`\``));
+  if (truncated) {
+    elements.push(
+      md(
+        `<font color='orange'>⚠️ 文件超过 3000 字符，已截短展示。完整内容请用本地编辑器打开：\`${opts.scope === 'global' ? '~/.kiro/steering/' : '.kiro/steering/'}${opts.name}\`</font>`,
+      ),
+    );
+  }
+  elements.push(hr());
+  const buttons: object[] = [
+    column({
+      width: 'auto',
+      elements: [
+        btn({
+          text: '↩ 返回列表',
+          type: 'default',
+          size: 'tiny',
+          value: { action: 'steering.list', scope: opts.scope },
+        }),
+      ],
+    }),
+  ];
+  if (opts.isAdmin && !truncated) {
+    buttons.push(
+      column({
+        width: 'auto',
+        elements: [
+          btn({
+            text: '✏️ 编辑',
+            type: 'primary',
+            size: 'tiny',
+            value: { action: 'steering.edit', scope: opts.scope, name: opts.name },
+          }),
+        ],
+      }),
+    );
+  }
+  if (opts.isAdmin) {
+    buttons.push(
+      column({
+        width: 'auto',
+        elements: [
+          btn({
+            text: '🗑️ 删除',
+            type: 'danger',
+            size: 'tiny',
+            value: { action: 'steering.rm', scope: opts.scope, name: opts.name },
+            confirm: {
+              title: '删除 steering 文件',
+              text: `确认删除 ${opts.name}？此操作不可撤销。`,
+            },
+          }),
+        ],
+      }),
+    );
+  }
+  elements.push(columnSet({ flexMode: 'flow', horizontalSpacing: 'small', columns: buttons }));
+
+  return {
+    schema: '2.0',
+    header: buildHeader({
+      title: `🧠 ${opts.name}`,
+      template: 'wathet',
+      subtitle: opts.scope === 'global' ? '全局 steering' : '项目 steering',
+    }),
+    body: { elements },
+  };
+}
+
+/**
+ * /steering edit/new 卡片：表单。
+ *
+ * 用 飞书 v2 的 input（multi-line）来支持长文本。
+ *   - default_value: 现有内容（new 时空）
+ *   - max_length: 5000（飞书 multi-line 上限保险值）
+ *
+ * 提交动作 value = { action: 'steering.submit', scope, name, isNew }
+ */
+export function buildMemoryEditFormCard(opts: {
+  scope: 'global' | 'project';
+  name: string;
+  content: string;
+  isNew: boolean;
+}): object {
+  const elements: object[] = [
+    md(
+      opts.isNew
+        ? `**新建 steering 文件** \`${opts.name}\`（${opts.scope === 'global' ? '全局' : '项目'}）`
+        : `**编辑** \`${opts.name}\`（${opts.scope === 'global' ? '全局' : '项目'}）`,
+    ),
+    md(
+      '<font color="grey">💡 文件用 markdown 格式。可选 frontmatter 控制加载策略：`inclusion: always|manual|fileMatch`</font>',
+    ),
+    {
+      tag: 'input',
+      name: 'content',
+      input_type: 'multiline',
+      default_value: opts.content,
+      placeholder: {
+        tag: 'plain_text',
+        content: '---\ninclusion: always\n---\n\n# 你的指令\n\n例如：写代码时注释用中文。',
+      },
+      rows: 15,
+      max_length: 5000,
+      width: 'fill',
+    },
+    hr(),
+    columnSet({
+      flexMode: 'flow',
+      horizontalSpacing: 'small',
+      columns: [
+        column({
+          width: 'auto',
+          elements: [
+            {
+              tag: 'button',
+              text: { tag: 'plain_text', content: '💾 保存' },
+              type: 'primary_filled',
+              size: 'small',
+              behaviors: [
+                {
+                  type: 'callback',
+                  value: {
+                    action: 'steering.submit',
+                    scope: opts.scope,
+                    name: opts.name,
+                    isNew: opts.isNew,
+                  },
+                },
+              ],
+              form_action_type: 'submit',
+            },
+          ],
+        }),
+        column({
+          width: 'auto',
+          elements: [
+            btn({
+              text: '取消',
+              type: 'default',
+              size: 'small',
+              value: { action: 'steering.list', scope: opts.scope },
+            }),
+          ],
+        }),
+      ],
+    }),
+  ];
+
+  return {
+    schema: '2.0',
+    header: buildHeader({
+      title: opts.isNew ? '📝 新建 Steering' : '✏️ 编辑 Steering',
+      template: 'blue',
+    }),
+    body: {
+      elements: [
+        {
+          tag: 'form',
+          name: 'steering_form',
+          elements,
+        },
+      ],
+    },
+  };
+}
+
+/**
+ * /steering new 入口卡片：先让用户输入文件名，再进入正式编辑表单。
+ *
+ * 这是为了避免 /steering new <name> 命令模式没用按钮触发——按钮没法带文本输入。
+ * 流程：点「新建」按钮 → 这张卡片 → 输入文件名 + 内容 → 提交。
+ */
+export function buildMemoryNewFormCard(opts: { scope: 'global' | 'project' }): object {
+  const elements: object[] = [
+    md(`**新建 steering 文件**（${opts.scope === 'global' ? '全局' : '项目'}）`),
+    md('<font color="grey">💡 文件名只允许字母、数字、`. _ -`，必须以 `.md` 结尾</font>'),
+    columnSet({
+      flexMode: 'none',
+      horizontalSpacing: 'small',
+      columns: [
+        column({ weight: 2, elements: [md('<font color="grey">文件名</font>')] }),
+        column({
+          weight: 5,
+          elements: [
+            {
+              tag: 'input',
+              name: 'name',
+              placeholder: { tag: 'plain_text', content: 'my-rules.md' },
+              max_length: 64,
+              width: 'fill',
+            },
+          ],
+        }),
+      ],
+    }),
+    md('<font color="grey">内容</font>'),
+    {
+      tag: 'input',
+      name: 'content',
+      input_type: 'multiline',
+      placeholder: {
+        tag: 'plain_text',
+        content: '---\ninclusion: always\n---\n\n# 你的指令\n\n例如：写代码时注释用中文。',
+      },
+      rows: 12,
+      max_length: 5000,
+      width: 'fill',
+    },
+    hr(),
+    columnSet({
+      flexMode: 'flow',
+      horizontalSpacing: 'small',
+      columns: [
+        column({
+          width: 'auto',
+          elements: [
+            {
+              tag: 'button',
+              text: { tag: 'plain_text', content: '💾 创建' },
+              type: 'primary_filled',
+              size: 'small',
+              behaviors: [
+                {
+                  type: 'callback',
+                  value: {
+                    action: 'steering.submit',
+                    scope: opts.scope,
+                    isNew: true,
+                  },
+                },
+              ],
+              form_action_type: 'submit',
+            },
+          ],
+        }),
+        column({
+          width: 'auto',
+          elements: [
+            btn({
+              text: '取消',
+              type: 'default',
+              size: 'small',
+              value: { action: 'steering.list', scope: opts.scope },
+            }),
+          ],
+        }),
+      ],
+    }),
+  ];
+
+  return {
+    schema: '2.0',
+    header: buildHeader({
+      title: '📝 新建 Steering',
+      template: 'blue',
+      subtitle: opts.scope === 'global' ? '全局' : '项目级',
+    }),
+    body: {
+      elements: [
+        {
+          tag: 'form',
+          name: 'steering_new_form',
+          elements,
+        },
+      ],
+    },
   };
 }
 
