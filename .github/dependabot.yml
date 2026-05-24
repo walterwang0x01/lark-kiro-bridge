@@ -24,12 +24,18 @@ updates:
     #   - @types/node v23+: 跟 engines.node >=20 不匹配
     #   - typescript v6: tsup dts 生成时报 TS5101（baseUrl deprecated），
     #     需要等 tsup 升级或加 ignoreDeprecations 配置
+    #   - pino-pretty v12+: ESM-only，dev 体验改动；当前 v11 够用
+    #   - p-queue v9+: ESM-only + 类型签名变化；当前 v8 够用
     ignore:
       - dependency-name: "zod"
         update-types: ["version-update:semver-major"]
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
       - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "pino-pretty"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "p-queue"
         update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions
