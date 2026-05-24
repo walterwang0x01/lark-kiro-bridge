@@ -277,8 +277,6 @@ node bin/lark-kiro-bridge.mjs run           # 本地跑（先 stop daemon）
 
 代码规范：TypeScript strict / Biome lint / vitest 测试 / commit 用 conventional commits。
 
-详见 [CONTRIBUTING.md](./CONTRIBUTING.md)（规划中）。
-
 ## 路线图
 
 - **v0.2** ✅ 当前版（结构化卡片 + 按钮回调 + Slack-style 工具面板 + 扫码绑定 + 语音输入 ASR）
