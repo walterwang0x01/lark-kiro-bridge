@@ -40,6 +40,9 @@ import {
   buildMemoryViewCard,
   buildMemoryEditFormCard,
   buildMemoryNewFormCard,
+  buildCronListCard,
+  buildCronTranslateConfirmCard,
+  buildCronTranslatedConfirmCard,
 } from '../card/builders.js';
 import { ChatPipeline } from './pipeline.js';
 import { listProcesses, findProcess } from '../daemon/registry.js';
@@ -50,6 +53,10 @@ import {
   normalizeFilename,
   extractInclusion,
 } from '../memory/store.js';
+import type { CronStore } from '../cron/store.js';
+import type { CronScheduler } from '../cron/scheduler.js';
+import type { CronTask } from '../cron/store.js';
+import { parseExpression, nextRun, formatNextRun } from '../cron/expression.js';
 import {
   isUserAllowed,
   isAdmin,
@@ -66,6 +73,9 @@ export interface DispatcherOptions {
   logger: Logger;
   /** 当 /reconnect 命令触发时调用，由 bootstrap 注入 */
   onReconnect?: () => Promise<void>;
+  /** Cron 持久化与调度（v0.6+ 注入；不注入则 /cron 命令报"未启用"）*/
+  cronStore?: CronStore;
+  cronScheduler?: CronScheduler;
 }
 
 export class Dispatcher {
@@ -77,6 +87,8 @@ export class Dispatcher {
   private readonly pipelines = new Map<string, ChatPipeline>();
   private readonly onReconnect?: () => Promise<void>;
   private readonly memory = new MemoryStore();
+  private readonly cronStore?: CronStore;
+  private readonly cronScheduler?: CronScheduler;
 
   constructor(opts: DispatcherOptions) {
     this.config = opts.config;
@@ -85,6 +97,8 @@ export class Dispatcher {
     this.workspaces = opts.workspaces;
     this.log = opts.logger.child({ module: 'dispatcher' });
     if (opts.onReconnect) this.onReconnect = opts.onReconnect;
+    if (opts.cronStore) this.cronStore = opts.cronStore;
+    if (opts.cronScheduler) this.cronScheduler = opts.cronScheduler;
   }
 
   private getPipeline(chatId: string): ChatPipeline {
@@ -303,6 +317,9 @@ export class Dispatcher {
         case 'memory':
           // list / view 只读，不要 admin；edit/new/rm 要
           return cmd.mode === 'edit' || cmd.mode === 'new' || cmd.mode === 'rm';
+        case 'cron':
+          // list 只读，不要 admin；其他全要
+          return cmd.mode !== 'list' && cmd.mode !== 'next';
         default:
           return false;
       }
@@ -508,6 +525,10 @@ export class Dispatcher {
         }
         case 'memory': {
           await this.handleMemoryCmd(msg, cmd, session.currentCwd);
+          return;
+        }
+        case 'cron': {
+          await this.handleCronCmd(msg, cmd, session.currentCwd);
           return;
         }
         case 'kiro-internal': {
@@ -1164,6 +1185,42 @@ export class Dispatcher {
         await this.handleSteeringSubmit(evt, session.currentCwd);
         return;
       }
+      case 'cron.list': {
+        await this.sendCardToChat(
+          evt.chatId,
+          await this.buildCronListCardForChat(evt.chatId, evt.senderOpenId),
+        );
+        return;
+      }
+      case 'cron.run': {
+        await this.handleCronAction(evt, 'run');
+        return;
+      }
+      case 'cron.pause': {
+        await this.handleCronAction(evt, 'pause');
+        return;
+      }
+      case 'cron.resume': {
+        await this.handleCronAction(evt, 'resume');
+        return;
+      }
+      case 'cron.rm': {
+        await this.handleCronAction(evt, 'rm');
+        return;
+      }
+      case 'cron.translateConfirm': {
+        const raw = String(evt.value['raw'] ?? '');
+        const prompt = String(evt.value['prompt'] ?? '');
+        await this.handleCronTranslate(evt, raw, prompt);
+        return;
+      }
+      case 'cron.createConfirmed': {
+        const expression = String(evt.value['expression'] ?? '');
+        const description = String(evt.value['description'] ?? '');
+        const prompt = String(evt.value['prompt'] ?? '');
+        await this.handleCronCreate(evt, session.currentCwd, expression, description, prompt);
+        return;
+      }
       default:
         this.log.debug({ action }, 'unknown card action, ignored');
     }
@@ -1182,7 +1239,13 @@ export class Dispatcher {
       action === 'steering.edit' ||
       action === 'steering.rm' ||
       action === 'steering.newPrompt' ||
-      action === 'steering.submit'
+      action === 'steering.submit' ||
+      action === 'cron.run' ||
+      action === 'cron.pause' ||
+      action === 'cron.resume' ||
+      action === 'cron.rm' ||
+      action === 'cron.translateConfirm' ||
+      action === 'cron.createConfirmed'
     );
   }
 
@@ -1579,6 +1642,431 @@ export class Dispatcher {
       const m = e instanceof MemoryError ? e.message : (e as Error).message;
       await this.sendCardToChat(evt.chatId, buildAckCard({ state: 'error', body: m }));
     }
+  }
+
+  // ===== /cron 实现 =====
+
+  /**
+   * /cron 命令统一入口。
+   *
+   * 子命令：list / add / rm / pause / resume / run / next / translate
+   *
+   * 大部分子命令需要 cronStore + cronScheduler；如果 dispatcher 没注入这两个，
+   * 给一张"功能未启用"提示卡（防止 /cron 命令在无 cron 配置下崩）。
+   */
+  private async handleCronCmd(
+    msg: IncomingMessage,
+    cmd: Extract<ParsedCommand, { kind: 'cron' }>,
+    cwd: string,
+  ): Promise<void> {
+    if (!this.cronStore || !this.cronScheduler) {
+      await this.sendInteractiveCard(
+        msg,
+        buildAckCard({
+          state: 'error',
+          title: '⚠️ 定时任务未启用',
+          body: '当前 bridge 实例没启用 cron 模块。请升级到最新版后重启。',
+        }),
+      );
+      return;
+    }
+
+    switch (cmd.mode) {
+      case 'list': {
+        await this.sendInteractiveCard(
+          msg,
+          await this.buildCronListCardForChat(msg.chatId, msg.senderOpenId),
+        );
+        return;
+      }
+      case 'add': {
+        // 解析表达式
+        const parsed = parseExpression(cmd.expression);
+        if (parsed.kind === 'unknown') {
+          // 弹翻译确认卡片
+          await this.sendInteractiveCard(
+            msg,
+            buildCronTranslateConfirmCard({ raw: cmd.expression, prompt: cmd.prompt }),
+          );
+          return;
+        }
+        // 直接创建
+        await this.handleCronCreateInner(
+          msg,
+          cwd,
+          parsed.expression,
+          parsed.description,
+          cmd.prompt,
+        );
+        return;
+      }
+      case 'translate': {
+        // 用户主动用 /cron translate 触发
+        await this.sendInteractiveCard(
+          msg,
+          buildCronTranslateConfirmCard({ raw: cmd.raw, prompt: '' }),
+        );
+        return;
+      }
+      case 'rm':
+      case 'pause':
+      case 'resume':
+      case 'run':
+      case 'next': {
+        const proc = await this.cronStore.findById(cmd.id);
+        if (!proc) {
+          await this.sendInteractiveCard(
+            msg,
+            buildAckCard({
+              state: 'error',
+              title: '❌ 没找到任务',
+              body: `没有匹配 \`${cmd.id}\` 的任务。用 \`/cron\` 查看列表。`,
+            }),
+          );
+          return;
+        }
+        await this.applyCronAction(
+          (card) => this.sendInteractiveCard(msg, card),
+          proc.id,
+          cmd.mode,
+        );
+        return;
+      }
+    }
+  }
+
+  /**
+   * 构造当前 chat 的 cron 列表卡片（带下次触发时间）。
+   */
+  private async buildCronListCardForChat(chatId: string, senderOpenId: string): Promise<object> {
+    if (!this.cronStore || !this.cronScheduler) {
+      return buildAckCard({
+        state: 'error',
+        title: '⚠️ 定时任务未启用',
+        body: 'cron 模块未注入',
+      });
+    }
+    const tasks = await this.cronStore.list(chatId);
+    return buildCronListCard({
+      tasks: tasks.map((t) => ({
+        id: t.id,
+        expression: t.expression,
+        description: t.description,
+        prompt: t.prompt,
+        enabled: t.enabled,
+        lastRunAt: t.lastRunAt,
+        nextRunAt: this.cronScheduler!.nextRun(t.id) ?? nextRun(t.expression),
+      })),
+      isAdmin: isAdmin(senderOpenId, this.config),
+    });
+  }
+
+  /** 处理列表卡片上的按钮操作（run/pause/resume/rm）。 */
+  private async handleCronAction(
+    evt: CardActionEvent,
+    mode: 'run' | 'pause' | 'resume' | 'rm',
+  ): Promise<void> {
+    const id = String(evt.value['id'] ?? '');
+    if (!id) return;
+    await this.applyCronAction((card) => this.sendCardToChat(evt.chatId, card), id, mode);
+  }
+
+  /**
+   * 应用一个 cron 操作（命令入口和按钮回调共用）。
+   *
+   * sendCard：怎么发回执卡片（命令是 reply，按钮是 sendToChat）
+   */
+  private async applyCronAction(
+    sendCard: (card: object) => Promise<void>,
+    id: string,
+    mode: 'run' | 'pause' | 'resume' | 'rm' | 'next',
+  ): Promise<void> {
+    if (!this.cronStore || !this.cronScheduler) return;
+    const task = await this.cronStore.findById(id);
+    if (!task) {
+      await sendCard(buildAckCard({ state: 'error', body: `没找到任务 \`${id}\`` }));
+      return;
+    }
+    switch (mode) {
+      case 'rm': {
+        const ok = await this.cronStore.delete(task.id);
+        if (ok) this.cronScheduler.unregister(task.id);
+        await sendCard(
+          buildAckCard({
+            state: 'done',
+            body: `已删除 \`${task.id.slice(0, 6)}\``,
+          }),
+        );
+        return;
+      }
+      case 'pause': {
+        await this.cronStore.update(task.id, (t) => {
+          t.enabled = false;
+        });
+        this.cronScheduler.unregister(task.id);
+        await sendCard(
+          buildAckCard({
+            state: 'done',
+            body: `已暂停 \`${task.id.slice(0, 6)}\`，用 resume 恢复`,
+          }),
+        );
+        return;
+      }
+      case 'resume': {
+        const updated = await this.cronStore.update(task.id, (t) => {
+          t.enabled = true;
+        });
+        if (updated) this.cronScheduler.register(updated);
+        await sendCard(
+          buildAckCard({
+            state: 'done',
+            body: `已恢复 \`${task.id.slice(0, 6)}\``,
+          }),
+        );
+        return;
+      }
+      case 'run': {
+        // 立即手动触发（异步），不等结果
+        this.fireCronTask(task).catch((e) => {
+          this.log.error({ err: e, id: task.id }, 'manual cron run failed');
+        });
+        await sendCard(
+          buildAckCard({
+            state: 'done',
+            body: `已手动触发 \`${task.id.slice(0, 6)}\`，结果会以新卡片回到这里`,
+          }),
+        );
+        return;
+      }
+      case 'next': {
+        const nxt = this.cronScheduler.nextRun(task.id) ?? nextRun(task.expression);
+        await sendCard(
+          buildAckCard({
+            state: 'done',
+            title: '⏰ 下次触发',
+            body: `\`${task.id.slice(0, 6)}\`：${formatNextRun(nxt)}`,
+          }),
+        );
+        return;
+      }
+    }
+  }
+
+  /**
+   * 用户在 /cron add 命令里给的表达式无法解析，点了「让 Kiro 翻译」按钮。
+   *
+   * 实现：spawn 一次 kiro-cli 让它输出 cron 5 段表达式。
+   * Kiro 翻译完后弹出二次确认卡片。
+   */
+  private async handleCronTranslate(
+    evt: CardActionEvent,
+    raw: string,
+    prompt: string,
+  ): Promise<void> {
+    if (!this.cronStore || !this.cronScheduler) return;
+    // 先发占位卡片
+    await this.sendCardToChat(
+      evt.chatId,
+      buildLoadingCard(`正在让 Kiro 把 \`${raw}\` 翻译成 cron 表达式…`, '🤔 翻译中'),
+    );
+
+    const translatePrompt = [
+      '把下面这句中文/英文调度描述转成标准 cron 5 段表达式。',
+      '只输出表达式本身（5 段，空格分隔），不要任何解释、引号、代码块标记。',
+      '例如输入"每天9点"，输出：0 9 * * *',
+      '',
+      `输入：${raw}`,
+    ].join('\n');
+
+    // 直接调 runKiro 的内部能力
+    const { runKiro } = await import('../kiro/runner.js');
+    let result: Awaited<ReturnType<typeof runKiro>>;
+    try {
+      const runOpts: Parameters<typeof runKiro>[0] = {
+        prompt: translatePrompt,
+        cwd: this.config.workspace.defaultCwd,
+        binPath: this.config.kiro.binPath,
+        trustedTools: [],
+        timeoutMs: 60_000,
+        idleTimeoutMs: 30_000,
+        signal: new AbortController().signal,
+        onChunk: () => undefined,
+      };
+      if (this.config.kiro.model !== undefined) runOpts.model = this.config.kiro.model;
+      result = await runKiro(runOpts);
+    } catch (e) {
+      await this.sendCardToChat(
+        evt.chatId,
+        buildAckCard({
+          state: 'error',
+          body: `翻译失败：${(e as Error).message}`,
+        }),
+      );
+      return;
+    }
+
+    // 提取 cron 表达式（Kiro 可能多说了几句）
+    const text = (result.text ?? '').trim();
+    const m = text.match(/(\S+\s+\S+\s+\S+\s+\S+\s+\S+)/);
+    if (!m) {
+      await this.sendCardToChat(
+        evt.chatId,
+        buildAckCard({
+          state: 'error',
+          title: '❌ Kiro 没给出 cron 表达式',
+          body: `Kiro 输出：\n\`\`\`\n${text.slice(0, 500)}\n\`\`\``,
+        }),
+      );
+      return;
+    }
+    const expression = (m[1] as string).trim();
+    const parsed = parseExpression(expression);
+    if (parsed.kind === 'unknown') {
+      await this.sendCardToChat(
+        evt.chatId,
+        buildAckCard({
+          state: 'error',
+          title: '❌ Kiro 给的表达式不合法',
+          body: `\`${expression}\`\n\n请用 \`/cron add\` 直接输入合法 cron 表达式。`,
+        }),
+      );
+      return;
+    }
+    // 弹二次确认卡
+    await this.sendCardToChat(
+      evt.chatId,
+      buildCronTranslatedConfirmCard({
+        raw,
+        expression: parsed.expression,
+        description: parsed.description,
+        nextRun: formatNextRun(nextRun(parsed.expression)),
+        prompt,
+      }),
+    );
+  }
+
+  /** 二次确认通过后真正创建 cron 任务（来自 cron.createConfirmed action）。 */
+  private async handleCronCreate(
+    evt: CardActionEvent,
+    cwd: string,
+    expression: string,
+    description: string,
+    prompt: string,
+  ): Promise<void> {
+    if (!this.cronStore || !this.cronScheduler) return;
+    const parsed = parseExpression(expression);
+    if (parsed.kind === 'unknown') {
+      await this.sendCardToChat(
+        evt.chatId,
+        buildAckCard({ state: 'error', body: `非法表达式 \`${expression}\`` }),
+      );
+      return;
+    }
+    try {
+      const task = await this.cronStore.create({
+        chatId: evt.chatId,
+        cwd,
+        expression: parsed.expression,
+        prompt,
+        description: description || parsed.description,
+        createdBy: evt.senderOpenId,
+      });
+      this.cronScheduler.register(task);
+      await this.sendCardToChat(
+        evt.chatId,
+        buildAckCard({
+          state: 'done',
+          title: '✅ 定时任务已创建',
+          body: `\`${task.id.slice(0, 6)}\`：${parsed.description}\n下次：\`${formatNextRun(nextRun(task.expression))}\``,
+        }),
+      );
+    } catch (e) {
+      await this.sendCardToChat(
+        evt.chatId,
+        buildAckCard({
+          state: 'error',
+          body: `创建失败：${(e as Error).message}`,
+        }),
+      );
+    }
+  }
+
+  /** 从 /cron add 命令直接创建（已通过表达式解析，不需要二次确认）。 */
+  private async handleCronCreateInner(
+    msg: IncomingMessage,
+    cwd: string,
+    expression: string,
+    description: string,
+    prompt: string,
+  ): Promise<void> {
+    if (!this.cronStore || !this.cronScheduler) return;
+    try {
+      const task = await this.cronStore.create({
+        chatId: msg.chatId,
+        cwd,
+        expression,
+        prompt,
+        description,
+        createdBy: msg.senderOpenId,
+      });
+      this.cronScheduler.register(task);
+      await this.sendInteractiveCard(
+        msg,
+        buildAckCard({
+          state: 'done',
+          title: '✅ 定时任务已创建',
+          body: `\`${task.id.slice(0, 6)}\`：${description}\n下次：\`${formatNextRun(nextRun(task.expression))}\`\nPrompt：${prompt.length > 100 ? prompt.slice(0, 100) + '…' : prompt}`,
+        }),
+      );
+    } catch (e) {
+      await this.sendInteractiveCard(
+        msg,
+        buildAckCard({
+          state: 'error',
+          body: `创建失败：${(e as Error).message}`,
+        }),
+      );
+    }
+  }
+
+  /**
+   * cron 任务到点触发：构造一个伪 IncomingMessage 调用 runKiroTask。
+   *
+   * 关键设计：触发时往原 chat 发一张「⏰ 定时任务」开头的卡片，跟用户主动 @ 走完全相同的卡片渲染体系，
+   * 只是头部多一个 "⏰ 定时" 标记（通过 prompt 前缀实现，让 Kiro 知道这是定时任务）。
+   *
+   * 注意：这里**不走** rapid-fire 合并（因为是定时，不存在用户连发）。
+   * 直接调用 executeKiroTask。
+   */
+  async fireCronTask(task: CronTask): Promise<void> {
+    const fakeMessage: IncomingMessage = {
+      eventId: `cron-${task.id}-${Date.now()}`,
+      messageId: '',
+      chatId: task.chatId,
+      chatType: 'group',
+      senderOpenId: task.createdBy || 'cron',
+      messageType: 'text',
+      rawContent: '',
+      text: task.prompt,
+      mentions: [],
+      receivedAt: Date.now(),
+    };
+    // 触发时给一张提示卡片，让用户知道是定时任务
+    try {
+      await this.sendCardToChat(
+        task.chatId,
+        buildAckCard({
+          state: 'done',
+          title: '⏰ 定时任务触发',
+          body: `\`${task.id.slice(0, 6)}\` (${task.description || task.expression})\n${task.prompt.length > 100 ? task.prompt.slice(0, 100) + '…' : task.prompt}`,
+        }),
+      );
+    } catch (e) {
+      this.log.warn({ err: e, id: task.id }, 'failed to send cron trigger notice');
+    }
+
+    // 调 executeKiroTask 跑 Kiro，跟普通消息一样的卡片渲染
+    await this.executeKiroTask(fakeMessage, task.prompt, task.cwd, [], undefined);
   }
 
   private async replyErrorCard(msg: IncomingMessage, body: string, cwd: string): Promise<void> {

@@ -7,6 +7,31 @@
 
 待发版的改动会先写在这里。
 
+## [0.6.0] — 2026-05-24
+
+### 新增（Added）
+
+- **`/cron` 定时任务**：在飞书内创建、列出、暂停、删除 cron 任务，到点自动调 Kiro 把结果发回原 chat
+  - 支持三种表达式输入（按优先级匹配）：
+    - **标准 cron 5 段**：`0 9 * * *`
+    - **Shorthand**：`@daily / @hourly / @weekly / @monthly / @yearly / @midnight`
+    - **中文关键词预设**：`每天9点 / 每天下午3点 / 每周一8点 / 工作日10点 / 周末10点 / 每月15号9点 / 每小时`
+  - **不识别时让 Kiro 翻译**：弹「让 Kiro 翻译吗？」确认卡 → spawn 一次 kiro-cli 让它输出 cron → 翻译结果再来一张二次确认卡 → 用户点「创建」才落盘。两次确认避免误操作
+  - 子命令：`add / rm / pause / resume / run / next / list / translate`，别名 `/schedule`
+  - 卡片每行带【手动跑 / 暂停 / 删除】按钮，admin 可见
+  - 触发时往原 chat 先发"⏰ 定时任务触发"提示卡，再走标准 runKiroTask 渲染结果（结构化卡片 / 流式 / 工具调用 panel 全部复用）
+- 限制：单 chat ≤ 20 任务、全机 ≤ 100 任务、prompt ≤ 1000 字符
+- 用 `croner` 作调度库，开启 `protect: true` 防上次还在跑下次又触发；不补偿漏触发（跟 GitHub Actions / AWS EventBridge 一致）
+- 持久化：`~/.lark-kiro-bridge/cron.json`，bridge 重启自动加载并重新注册
+- 新增 `src/cron/expression.ts`（解析器）+ `src/cron/store.ts`（持久化）+ `src/cron/scheduler.ts`（调度器）
+- 44 个新单元测试（29 expression + 15 parse）
+
+### 变更（Changed）
+
+- `Dispatcher` 构造函数新增可选参数 `cronStore` / `cronScheduler`；不注入则 `/cron` 命令报"未启用"
+- `bootstrap.ts` 启动时实例化 cron 模块、加载持久化任务、关闭时停掉调度器
+- 新依赖：`croner@^9.0.0`
+
 ## [0.5.0] — 2026-05-24
 
 ### 新增（Added）
@@ -165,7 +190,8 @@
 - 飞书免费版租户不支持 ASR，语音输入在路线图
 - 群里 `@all` 永不响应（设计行为）
 
-[Unreleased]: https://github.com/walterwang0x01/lark-kiro-bridge/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/walterwang0x01/lark-kiro-bridge/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/walterwang0x01/lark-kiro-bridge/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/walterwang0x01/lark-kiro-bridge/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/walterwang0x01/lark-kiro-bridge/compare/v0.3.1...v0.4.0
 [0.3.0]: https://github.com/walterwang0x01/lark-kiro-bridge/compare/v0.2.0...v0.3.0

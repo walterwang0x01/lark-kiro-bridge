@@ -13,6 +13,8 @@ import { SessionStore } from '../store/sessions.js';
 import { WorkspaceStore } from '../store/workspaces.js';
 import { Dispatcher } from './dispatcher.js';
 import { registerSelf, unregisterSelf, listProcesses } from '../daemon/registry.js';
+import { CronStore } from '../cron/store.js';
+import { CronScheduler } from '../cron/scheduler.js';
 
 export interface RunBridgeHandle {
   /** 主动停止；返回 promise 在所有清理完成后 resolve */
@@ -57,6 +59,7 @@ export async function runBridge(): Promise<RunBridgeHandle> {
   });
   const sessions = new SessionStore();
   const workspaces = new WorkspaceStore();
+  const cronStore = new CronStore();
 
   // 当前实现里 lark 实例不会被替换（reconnect 复用同一实例），所以是 const。
   // 如果未来需要在 reconnect 时换新实例（比如换 appId），把这里改成 let 即可。
@@ -70,12 +73,28 @@ export async function runBridge(): Promise<RunBridgeHandle> {
     });
   };
 
+  // cron 调度器先创建（onFire 用 lazy 引用 dispatcher）
+  let dispatcherRef: Dispatcher | undefined;
+  const cronScheduler = new CronScheduler({
+    store: cronStore,
+    logger: log,
+    onFire: ({ task }) => {
+      if (!dispatcherRef) {
+        log.warn({ id: task.id }, 'cron fired before dispatcher ready, skip');
+        return;
+      }
+      return dispatcherRef.fireCronTask(task);
+    },
+  });
+
   const dispatcher = new Dispatcher({
     config,
     lark,
     sessions,
     workspaces,
     logger: log,
+    cronStore,
+    cronScheduler,
     onReconnect: async () => {
       log.info('reconnect requested via /reconnect');
       try {
@@ -88,6 +107,10 @@ export async function runBridge(): Promise<RunBridgeHandle> {
       await startEventLoop();
     },
   });
+  dispatcherRef = dispatcher;
+
+  // 加载持久化的 cron 任务，注册到调度器
+  await cronScheduler.start();
 
   await startEventLoop();
 
@@ -96,6 +119,11 @@ export async function runBridge(): Promise<RunBridgeHandle> {
     if (stopped) return;
     stopped = true;
     log.info('shutting down');
+    try {
+      cronScheduler.stop();
+    } catch {
+      // ignore
+    }
     try {
       larkRef.close();
     } catch {

@@ -377,6 +377,7 @@ export function buildHelpCard(): object {
       ['/timeout [N|off]', 'idle watchdog 阈值'],
       ['/config', '查看 / 编辑访问控制 + 偏好（管理员）'],
       ['/steering', '管理 Kiro steering（指令文件）'],
+      ['/cron', '管理定时任务'],
       ['/ps', '列出本机所有 bridge 进程'],
       ['/exit <id>', '停止指定进程（管理员）'],
       ['/reconnect', '重连飞书 WebSocket'],
@@ -1465,6 +1466,259 @@ export function buildMemoryNewFormCard(opts: { scope: 'global' | 'project' }): o
           name: 'steering_new_form',
           elements,
         },
+      ],
+    },
+  };
+}
+
+// ----- /cron 卡片 -----
+
+/**
+ * /cron list 卡片：列出当前 chat 的所有任务。
+ *
+ * 每行：[id 短] [描述/表达式] [下次触发] [操作按钮 暂停/恢复/删除/手动跑]
+ */
+export function buildCronListCard(opts: {
+  tasks: Array<{
+    id: string;
+    expression: string;
+    description: string;
+    prompt: string;
+    enabled: boolean;
+    lastRunAt: number;
+    nextRunAt: Date | null;
+  }>;
+  isAdmin: boolean;
+}): object {
+  const elements: object[] = [];
+
+  if (opts.tasks.length === 0) {
+    elements.push(md('_当前 chat 还没有定时任务。_\n\n用 `/cron add <表达式> <prompt>` 添加。'));
+    elements.push(
+      md(
+        [
+          '<font color="grey">表达式支持：</font>',
+          '- 标准 cron：`0 9 * * *`',
+          '- shorthand：`@daily` `@hourly` `@weekly`',
+          '- 中文关键词：`每天9点` `每周一8点` `工作日10点` `周末10点`',
+          '- 复杂自然语言：`/cron translate <你的描述>` 让 Kiro 翻译',
+        ].join('\n'),
+      ),
+    );
+    return {
+      schema: '2.0',
+      header: buildHeader({ title: '⏰ 定时任务', template: 'wathet' }),
+      body: { elements },
+    };
+  }
+
+  for (const t of opts.tasks) {
+    const idShort = `\`${t.id.slice(0, 6)}\``;
+    const desc = t.description || t.expression;
+    const next = t.nextRunAt
+      ? new Date(t.nextRunAt).toLocaleString('zh-CN', {
+          hour12: false,
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+        })
+      : '—';
+    const enabledTag = t.enabled
+      ? `<font color='green'>● 启用</font>`
+      : `<font color='grey'>○ 暂停</font>`;
+    const promptShort = t.prompt.length > 40 ? t.prompt.slice(0, 40) + '…' : t.prompt;
+    elements.push(
+      columnSet({
+        flexMode: 'none',
+        horizontalSpacing: 'small',
+        columns: [
+          column({
+            weight: 5,
+            elements: [md(`${idShort} ${enabledTag}<br><font color='grey'>${desc}</font>`)],
+          }),
+          column({
+            weight: 4,
+            elements: [
+              md(
+                `<font color='grey'>下次：${next}</font><br><font color='grey'>${promptShort}</font>`,
+              ),
+            ],
+          }),
+        ],
+      }),
+    );
+    if (opts.isAdmin) {
+      elements.push(
+        columnSet({
+          flexMode: 'flow',
+          horizontalSpacing: 'small',
+          columns: [
+            column({
+              width: 'auto',
+              elements: [
+                btn({
+                  text: '▶ 手动跑',
+                  type: 'default',
+                  size: 'tiny',
+                  value: { action: 'cron.run', id: t.id },
+                }),
+              ],
+            }),
+            column({
+              width: 'auto',
+              elements: [
+                btn({
+                  text: t.enabled ? '⏸ 暂停' : '▶ 恢复',
+                  type: 'default',
+                  size: 'tiny',
+                  value: { action: t.enabled ? 'cron.pause' : 'cron.resume', id: t.id },
+                }),
+              ],
+            }),
+            column({
+              width: 'auto',
+              elements: [
+                btn({
+                  text: '🗑️ 删除',
+                  type: 'danger',
+                  size: 'tiny',
+                  value: { action: 'cron.rm', id: t.id },
+                  confirm: {
+                    title: '删除定时任务',
+                    text: `确认删除 \`${t.id.slice(0, 6)}\`？此操作不可撤销。`,
+                  },
+                }),
+              ],
+            }),
+          ],
+        }),
+      );
+    }
+    elements.push(hr());
+  }
+
+  return {
+    schema: '2.0',
+    header: buildHeader({
+      title: '⏰ 定时任务',
+      template: 'wathet',
+      subtitle: `${opts.tasks.length} 个`,
+    }),
+    body: { elements },
+  };
+}
+
+/**
+ * 自然语言翻译确认卡片。
+ *
+ * 当用户输入的表达式不是 cron / shorthand / 关键词预设时，
+ * 弹这张卡片问：「让 Kiro 翻译吗？」
+ */
+export function buildCronTranslateConfirmCard(opts: { raw: string; prompt: string }): object {
+  return {
+    schema: '2.0',
+    header: buildHeader({ title: '🤔 不识别的表达式', template: 'orange' }),
+    body: {
+      elements: [
+        md(`你输入的：\`${opts.raw}\``),
+        md(
+          [
+            '这看起来像自然语言，但不在内置预设里。',
+            '',
+            '**可以让 Kiro 帮你翻译成 cron 表达式吗？**',
+            '（会跑一次 Kiro 来分析；翻译完会再问你确认）',
+          ].join('\n'),
+        ),
+        hr(),
+        columnSet({
+          flexMode: 'flow',
+          horizontalSpacing: 'small',
+          columns: [
+            column({
+              width: 'auto',
+              elements: [
+                btn({
+                  text: '✅ 让 Kiro 翻译',
+                  type: 'primary',
+                  size: 'small',
+                  value: { action: 'cron.translateConfirm', raw: opts.raw, prompt: opts.prompt },
+                }),
+              ],
+            }),
+            column({
+              width: 'auto',
+              elements: [
+                btn({
+                  text: '查看支持的格式',
+                  type: 'default',
+                  size: 'small',
+                  value: { action: 'cron.list' },
+                }),
+              ],
+            }),
+          ],
+        }),
+      ],
+    },
+  };
+}
+
+/**
+ * Kiro 翻译完成后的二次确认卡片。
+ */
+export function buildCronTranslatedConfirmCard(opts: {
+  raw: string;
+  expression: string;
+  description: string;
+  nextRun: string;
+  prompt: string;
+}): object {
+  return {
+    schema: '2.0',
+    header: buildHeader({ title: '✅ 翻译结果', template: 'green' }),
+    body: {
+      elements: [
+        md(`原文：\`${opts.raw}\``),
+        md(`Cron 表达式：**\`${opts.expression}\`**`),
+        md(`含义：${opts.description}`),
+        md(`下次触发：\`${opts.nextRun}\``),
+        hr(),
+        md(`Prompt：${opts.prompt.length > 100 ? opts.prompt.slice(0, 100) + '…' : opts.prompt}`),
+        hr(),
+        columnSet({
+          flexMode: 'flow',
+          horizontalSpacing: 'small',
+          columns: [
+            column({
+              width: 'auto',
+              elements: [
+                btn({
+                  text: '✅ 创建任务',
+                  type: 'primary_filled',
+                  size: 'small',
+                  value: {
+                    action: 'cron.createConfirmed',
+                    expression: opts.expression,
+                    description: opts.description,
+                    prompt: opts.prompt,
+                  },
+                }),
+              ],
+            }),
+            column({
+              width: 'auto',
+              elements: [
+                btn({
+                  text: '取消',
+                  type: 'default',
+                  size: 'small',
+                  value: { action: 'cron.list' },
+                }),
+              ],
+            }),
+          ],
+        }),
       ],
     },
   };

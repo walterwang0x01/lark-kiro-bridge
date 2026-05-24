@@ -48,6 +48,14 @@ export type ParsedCommand =
   | { kind: 'memory'; mode: 'edit'; scope: 'global' | 'project'; name: string }
   | { kind: 'memory'; mode: 'new'; scope: 'global' | 'project'; name: string }
   | { kind: 'memory'; mode: 'rm'; scope: 'global' | 'project'; name: string }
+  | { kind: 'cron'; mode: 'list' }
+  | { kind: 'cron'; mode: 'add'; expression: string; prompt: string }
+  | { kind: 'cron'; mode: 'rm'; id: string }
+  | { kind: 'cron'; mode: 'pause'; id: string }
+  | { kind: 'cron'; mode: 'resume'; id: string }
+  | { kind: 'cron'; mode: 'run'; id: string }
+  | { kind: 'cron'; mode: 'next'; id: string }
+  | { kind: 'cron'; mode: 'translate'; raw: string }
   | { kind: 'model'; mode: 'show' }
   | { kind: 'model'; mode: 'set'; name: string }
   | { kind: 'model'; mode: 'reset' }
@@ -208,6 +216,84 @@ export function parseCommand(text: string): ParsedCommand | null {
         case 'delete':
           if (!arg) return { kind: 'unknown', raw: trimmed };
           return { kind: 'memory', mode: 'rm', scope, name: arg };
+        default:
+          return { kind: 'unknown', raw: trimmed };
+      }
+    }
+    case 'cron':
+    case 'schedule': {
+      // /cron                    → list
+      // /cron list               → list
+      // /cron add <expr> <prompt>
+      // /cron rm <id>
+      // /cron pause <id>
+      // /cron resume <id>
+      // /cron run <id>           手动立即跑一次
+      // /cron next <id>          看下次触发
+      // /cron translate <raw>    让 Kiro 翻译自然语言（卡片确认后才会调）
+      if (!tail) return { kind: 'cron', mode: 'list' };
+      const tokens = tail.split(/\s+/);
+      const sub = (tokens[0] ?? '').toLowerCase();
+      const restRaw = tail.slice((tokens[0] ?? '').length).trim();
+
+      switch (sub) {
+        case 'list':
+        case 'ls':
+          return { kind: 'cron', mode: 'list' };
+        case 'add':
+        case 'create':
+        case 'new': {
+          // /cron add <expr> <prompt>
+          // expr 可能是单 token（cron / shorthand）或带空格的中文关键词。
+          // 策略：如果 restRaw 第一个 token 是 cron 5 段（5 个空格分隔的 *|0-9|,|-|/|_）
+          //       就把前 5 个 token 当 expr，其余当 prompt
+          //       否则把第一个 token 当 expr（shorthand / 中文）
+          if (!restRaw) return { kind: 'unknown', raw: trimmed };
+          // 检查是否 5 段 cron（每段都是 cron 字符）
+          const parts = restRaw.split(/\s+/);
+          const cronCharRe = /^[\d*\-,/]+$/;
+          if (parts.length >= 6 && parts.slice(0, 5).every((p) => cronCharRe.test(p))) {
+            const expression = parts.slice(0, 5).join(' ');
+            const prompt = parts.slice(5).join(' ').trim();
+            if (!prompt) return { kind: 'unknown', raw: trimmed };
+            return { kind: 'cron', mode: 'add', expression, prompt };
+          }
+          // 单 token expr
+          const expression = parts[0] ?? '';
+          const prompt = parts.slice(1).join(' ').trim();
+          if (!expression || !prompt) return { kind: 'unknown', raw: trimmed };
+          return { kind: 'cron', mode: 'add', expression, prompt };
+        }
+        case 'rm':
+        case 'delete':
+        case 'del':
+        case 'remove': {
+          if (!restRaw) return { kind: 'unknown', raw: trimmed };
+          return { kind: 'cron', mode: 'rm', id: restRaw };
+        }
+        case 'pause': {
+          if (!restRaw) return { kind: 'unknown', raw: trimmed };
+          return { kind: 'cron', mode: 'pause', id: restRaw };
+        }
+        case 'resume': {
+          if (!restRaw) return { kind: 'unknown', raw: trimmed };
+          return { kind: 'cron', mode: 'resume', id: restRaw };
+        }
+        case 'run':
+        case 'fire': {
+          if (!restRaw) return { kind: 'unknown', raw: trimmed };
+          return { kind: 'cron', mode: 'run', id: restRaw };
+        }
+        case 'next': {
+          if (!restRaw) return { kind: 'unknown', raw: trimmed };
+          return { kind: 'cron', mode: 'next', id: restRaw };
+        }
+        case 'translate':
+        case 'parse': {
+          // 让 Kiro 翻译自然语言（dispatcher 拿到后弹卡片确认）
+          if (!restRaw) return { kind: 'unknown', raw: trimmed };
+          return { kind: 'cron', mode: 'translate', raw: restRaw };
+        }
         default:
           return { kind: 'unknown', raw: trimmed };
       }

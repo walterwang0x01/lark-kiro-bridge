@@ -14,6 +14,7 @@ export const CONFIG_FILE = join(DATA_DIR, 'config.json');
 export const SESSIONS_FILE = join(DATA_DIR, 'sessions.json');
 export const WORKSPACES_FILE = join(DATA_DIR, 'workspaces.json');
 export const PROCESSES_FILE = join(DATA_DIR, 'processes.json');
+export const CRON_FILE = join(DATA_DIR, 'cron.json');
 
 /**
  * 确保数据目录存在；权限 0700（只有当前用户可访问，因为里面有 App Secret）。

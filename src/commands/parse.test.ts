@@ -494,4 +494,91 @@ describe('parseCommand', () => {
       expect(parseCommand('  /help  ')).toEqual({ kind: 'help' });
     });
   });
+
+  describe('/cron 定时任务', () => {
+    it('/cron → list', () => {
+      expect(parseCommand('/cron')).toEqual({ kind: 'cron', mode: 'list' });
+    });
+    it('/schedule 是别名', () => {
+      expect(parseCommand('/schedule')).toEqual({ kind: 'cron', mode: 'list' });
+    });
+    it('/cron list', () => {
+      expect(parseCommand('/cron list')).toEqual({ kind: 'cron', mode: 'list' });
+    });
+    it('/cron add 标准 cron 表达式 + prompt', () => {
+      expect(parseCommand('/cron add 0 9 * * * 总结昨天 git commits')).toEqual({
+        kind: 'cron',
+        mode: 'add',
+        expression: '0 9 * * *',
+        prompt: '总结昨天 git commits',
+      });
+    });
+    it('/cron add @daily', () => {
+      expect(parseCommand('/cron add @daily 总结')).toEqual({
+        kind: 'cron',
+        mode: 'add',
+        expression: '@daily',
+        prompt: '总结',
+      });
+    });
+    it('/cron add 中文关键词 + prompt', () => {
+      expect(parseCommand('/cron add 每天9点 总结昨天')).toEqual({
+        kind: 'cron',
+        mode: 'add',
+        expression: '每天9点',
+        prompt: '总结昨天',
+      });
+    });
+    it('/cron add 缺 prompt → unknown', () => {
+      expect(parseCommand('/cron add @daily').kind).toBe('unknown');
+    });
+    it('/cron rm <id>', () => {
+      expect(parseCommand('/cron rm abc12345')).toEqual({
+        kind: 'cron',
+        mode: 'rm',
+        id: 'abc12345',
+      });
+    });
+    it('/cron pause <id>', () => {
+      expect(parseCommand('/cron pause abc12345')).toEqual({
+        kind: 'cron',
+        mode: 'pause',
+        id: 'abc12345',
+      });
+    });
+    it('/cron resume <id>', () => {
+      expect(parseCommand('/cron resume abc12345')).toEqual({
+        kind: 'cron',
+        mode: 'resume',
+        id: 'abc12345',
+      });
+    });
+    it('/cron run <id>', () => {
+      expect(parseCommand('/cron run abc12345')).toEqual({
+        kind: 'cron',
+        mode: 'run',
+        id: 'abc12345',
+      });
+    });
+    it('/cron next <id>', () => {
+      expect(parseCommand('/cron next abc12345')).toEqual({
+        kind: 'cron',
+        mode: 'next',
+        id: 'abc12345',
+      });
+    });
+    it('/cron translate <自然语言>', () => {
+      expect(parseCommand('/cron translate 每天会议前总结')).toEqual({
+        kind: 'cron',
+        mode: 'translate',
+        raw: '每天会议前总结',
+      });
+    });
+    it('/cron rm 缺 id → unknown', () => {
+      expect(parseCommand('/cron rm').kind).toBe('unknown');
+    });
+    it('/cron 未知子命令 → unknown', () => {
+      expect(parseCommand('/cron foo bar').kind).toBe('unknown');
+    });
+  });
 });

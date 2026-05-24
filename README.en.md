@@ -59,6 +59,7 @@
 - 🔘 **Clickable buttons** — `/model` `/help` `/status` `/ws list` `/config` are all interactive cards, zero command memorization
 - 📝 **`/config` in-Feishu form** — Edit access control & preferences inside Feishu, takes effect instantly, anti-lockout validation
 - 🚄 **Rapid-fire message merging** — Multiple short messages within 200ms merge into a single Kiro call, no more abort-and-retry
+- ⏰ **`/cron` scheduled tasks** — Accepts standard cron, shorthand (`@daily`), and Chinese keywords; falls back to Kiro translation with two-step confirmation. "Every day 9am summarize yesterday's commits" — done.
 - 🧠 **`/steering` to manage Kiro instruction files in Feishu** — list/view/edit/new/rm, global or project scope, edit via in-Feishu form, persists permanently
 - 🎤 **Voice input** — Send a voice message in Feishu → auto-transcribed (Feishu ASR) → fed to Kiro. Requires `ffmpeg` and ASR scope.
 - 🛡️ **Process group kill** — `detached: true` + `process.kill(-pid)` reaches kiro-cli's grandchildren
@@ -144,6 +145,7 @@ Platform mapping:
 | `/timeout [N\|off]` | `/to` | Idle watchdog threshold (minutes) |
 | `/ps` | — | List all bridge processes on this host |
 | `/steering` | `/memory` `/mem` | List Kiro steering files for current project (card + buttons) |
+| `/cron` | `/schedule` | List scheduled tasks for current chat (card + buttons) |
 | `/doctor [desc]` | — | Let Kiro inspect logs and diagnose |
 
 ### Admin commands
@@ -156,6 +158,8 @@ Platform mapping:
 | `/ws use <name>` | Switch to a named workspace |
 | `/ws remove <name>` | Delete a named workspace |
 | `/steering edit/new/rm <name>` | Edit / create / delete a steering file |
+| `/cron add <expr> <prompt>` | Add a scheduled task; expr accepts cron / `@daily` / Chinese keywords |
+| `/cron rm/pause/resume/run <id>` | Delete/pause/resume/manually run a task |
 | `/exit <id\|#>` | Stop a bridge process (self / others) |
 | `/reconnect` | Force reconnect Feishu WebSocket |
 
@@ -302,7 +306,7 @@ Conventions: TypeScript strict / Biome lint / vitest tests / conventional commit
 - **v0.3** ✅ In-Feishu `/config` form + three-tier access control (DM bypass) + rapid-fire message merging
 - **v0.4** ✅ Linux systemd / Windows Task Scheduler daemon + `/ps` `/exit` in-Feishu process management
 - **v0.5** ✅ `/steering` to manage Kiro instruction files in Feishu (list/view/edit/new/rm, global/project scope)
-- **v0.6** `/cron` scheduled tasks — natural-language or cron-expression schedules, e.g. "every day 6am summarize trending"
+- **v0.6** ✅ `/cron` scheduled tasks (cron / shorthand / Chinese keywords; LLM fallback with two-step confirmation)
 - **v1.0** Centralized server deployment / multi-user isolation / web admin panel
 
 ## 📄 License

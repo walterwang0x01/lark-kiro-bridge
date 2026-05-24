@@ -25,6 +25,7 @@ export function helpMarkdown(): string {
     '`/model [name|auto]` — 查看 / 切换 / 重置模型',
     '`/config` — 查看 / 编辑访问控制 + 偏好（管理员）',
     '`/steering [list|view|edit|new|rm] [--global]` — 管理 Kiro steering 文件',
+    '`/cron [list|add|rm|pause|resume|run|next|translate]` — 定时任务',
     '`/ps` — 列出本机所有 bridge 进程',
     '`/exit <id>` — 停止指定进程（管理员）',
     '`/reconnect` — 重连飞书 WebSocket',
