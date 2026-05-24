@@ -11,14 +11,22 @@ updates:
     labels:
       - dependencies
     groups:
-      # Group all minor/patch updates into one PR per group to reduce noise
+      # 把所有 minor/patch 升级合成一个 PR 减少噪音
       production-dependencies:
         dependency-type: production
         update-types: [minor, patch]
       development-dependencies:
         dependency-type: development
         update-types: [minor, patch]
-    # Major bumps still get individual PRs so they can be reviewed carefully
+    # Major bumps 仍然单独 PR 便于人工审查
+    # 已知有 breaking 但暂未做 migration 的包先忽略 major，避免每周都被提：
+    #   - zod v4: removed empty .default({}) — 需要重写 src/lib/config.ts 默认值
+    #   - @types/node v23+: 跟 engines.node >=20 不匹配
+    ignore:
+      - dependency-name: "zod"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions
     directory: "/"
