@@ -12,6 +12,7 @@
 - **每个 chat 独立 Kiro session**：不同群、不同工作目录互相隔离，续聊靠 `--resume-id` 自动接上。
 - **打断与排队**：新消息到达自动 abort 旧任务；`/stop` 主动中止。
 - **图片 / 文件输入**:发到机器人,自动下载到本地,把绝对路径喂给 Kiro 处理。
+- **语音输入**：发语音消息，bridge 调飞书 ASR 转成文字（≤60 秒，需 `ffmpeg` 和 ASR 权限），再交给 Kiro 处理。
 - **多模型切换**：`/model` 命令查看 / 切换 / 重置 kiro-cli 模型，支持 per-chat 覆盖。
 
 ### 工作区管理
@@ -47,6 +48,10 @@
 - Node.js ≥ 20
 - `kiro-cli` 已装好且能跑：`kiro-cli chat --no-interactive --trust-all-tools "hi"` 应有输出
 - 飞书企业自建应用，开启**机器人能力** + 订阅 `im.message.receive_v1` 事件 + 长连接模式
+- **可选**：`ffmpeg`（用于飞书语音转文字）。`brew install ffmpeg` / `apt install ffmpeg`。
+  没装也能跑，只是收到语音消息时会提示"请安装 ffmpeg"，文字和图片都不受影响。
+- **可选**：飞书 ASR scope `speech_to_text:speech`（在飞书开发者后台为 bot 添加）。
+  没加权限语音转写会失败，但其他功能正常。**飞书免费版租户不支持调用 ASR**。
 
 ### 1. 安装
 
