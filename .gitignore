@@ -7,3 +7,10 @@ dist/
 *.tsbuildinfo
 coverage/
 .vitest/
+
+# IDE
+.vscode/
+.idea/
+
+# npm pack 产物（本地试装用，不入库）
+*.tgz
