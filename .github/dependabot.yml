@@ -22,10 +22,14 @@ updates:
     # 已知有 breaking 但暂未做 migration 的包先忽略 major，避免每周都被提：
     #   - zod v4: removed empty .default({}) — 需要重写 src/lib/config.ts 默认值
     #   - @types/node v23+: 跟 engines.node >=20 不匹配
+    #   - typescript v6: tsup dts 生成时报 TS5101（baseUrl deprecated），
+    #     需要等 tsup 升级或加 ignoreDeprecations 配置
     ignore:
       - dependency-name: "zod"
         update-types: ["version-update:semver-major"]
       - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "typescript"
         update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions
