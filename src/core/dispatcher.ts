@@ -17,6 +17,7 @@ import type { LarkClient } from '../lark/client.js';
 import type { IncomingMessage, CardActionEvent } from '../lark/types.js';
 import { stripMentions } from '../lark/parse.js';
 import { downloadMessageMedia } from '../lark/media.js';
+import { transcribeAudio } from '../lark/asr.js';
 import { parseCommand, type ParsedCommand } from '../commands/parse.js';
 import { isUserAllowed, isAdmin, validateCwd, SecurityError } from '../lib/security.js';
 import { readRecentLogLines } from '../lib/logger.js';
@@ -158,13 +159,51 @@ export class Dispatcher {
 
     // 4.5) 媒体下载（在文本之前完成，下面 prompt 拼接时把路径塞前面）
     let mediaPaths: string[] = [];
+    let asrText = ''; // 语音转写出来的文本，会被拼到 cleanText 前面
     if (supportedMedia) {
       try {
         mediaPaths = await downloadMessageMedia(this.lark, msg);
       } catch (e) {
         this.log.warn({ err: e }, 'media download error, will skip');
       }
-      if (mediaPaths.length === 0 && !cleanText) {
+      // 音频消息：尝试调飞书 ASR 转写。成功就把 .opus 路径从 mediaPaths 移除（kiro-cli 看不懂音频），
+      // 失败则把音频当成普通"文件附件"留给 Kiro，Kiro 起码能告诉用户"这是个音频文件"。
+      if (msg.messageType === 'audio' && mediaPaths.length > 0) {
+        const audioPath = mediaPaths[0]!;
+        const r = await transcribeAudio(this.lark, audioPath);
+        if (r.ok) {
+          asrText = r.text;
+          mediaPaths = mediaPaths.filter((p) => p !== audioPath);
+          this.log.info({ textLen: r.text.length }, 'audio transcribed');
+        } else {
+          this.log.warn({ reason: r.reason, detail: r.detail }, 'audio transcription failed');
+          // 给用户一个明确的提示卡片，告诉他/她语音没识别成功。不阻塞继续
+          // 走 runKiro（mediaPaths 还在，Kiro 至少能识别这是音频文件）。
+          const hint = (() => {
+            switch (r.reason) {
+              case 'ffmpeg-missing':
+                return '⚠️ 未检测到 `ffmpeg`，无法把语音转成文字。\n请安装：`brew install ffmpeg`（macOS）或包管理器对应命令。';
+              case 'too-long':
+                return `⚠️ 语音太长（${r.detail ?? '> 60s'}），飞书 ASR 仅支持 60 秒以内。请分段重发。`;
+              case 'api-failed':
+                return `⚠️ 语音识别失败：${r.detail ?? '请稍后重试'}`;
+              case 'ffmpeg-failed':
+                return '⚠️ 语音转码失败，可能音频文件损坏。';
+              case 'empty':
+                return '⚠️ 语音中没识别到有效内容。';
+              default:
+                return '⚠️ 语音识别失败。';
+            }
+          })();
+          await this.sendInteractiveCard(
+            msg,
+            buildAckCard({ state: 'error', title: '🎙️ 语音转写失败', body: hint }),
+          );
+          // 如果用户没附带文字，就到此为止；附带了文字才继续走 Kiro
+          if (!cleanText) return;
+        }
+      }
+      if (mediaPaths.length === 0 && !cleanText && !asrText) {
         // 媒体下载失败、又没文字 → 报错给用户
         await this.sendInteractiveCard(
           msg,
@@ -178,10 +217,17 @@ export class Dispatcher {
       }
     }
 
-    if (!cleanText && mediaPaths.length === 0) {
+    if (!cleanText && !asrText && mediaPaths.length === 0) {
       this.log.debug('empty text after strip and no media, ignored');
       return;
     }
+
+    // 把 ASR 转写出的文本拼到用户文本前。明确标注来源，让 Kiro 知道这是语音。
+    const effectiveText = asrText
+      ? cleanText
+        ? `[语音] ${asrText}\n\n${cleanText}`
+        : `[语音] ${asrText}`
+      : cleanText;
 
     // 5) 解析命令
     const cmd = parseCommand(cleanText);
@@ -411,7 +457,7 @@ export class Dispatcher {
     // 7) 普通消息 / 未知命令 → 跑 Kiro
     await this.runKiroTask(
       msg,
-      cleanText,
+      effectiveText,
       session.currentCwd,
       mediaPaths,
       session.idleTimeoutMinutes,
