@@ -70,24 +70,46 @@
 - macOS (Linux / Windows daemon on roadmap)
 - Node.js ≥ 20
 - `kiro-cli` installed and logged in
-- A Feishu / Lark custom app — bot enabled, subscribed to `im.message.receive_v1` and `card.action.trigger` (long-connection mode)
+- A Feishu / Lark account (personal edition is fine — the QR wizard auto-creates the app)
 
-### 3 Steps
+### 30-second setup ⚡
 
 ```bash
 # 1. Install
 npm i -g lark-kiro-bridge
 
-# 2. Configure Feishu credentials
-lark-kiro-bridge init
-
-# 3. Start the background daemon
-lark-kiro-bridge start
+# 2. Run (first launch shows a QR — scan, approve, done)
+lark-kiro-bridge run
 ```
+
+> **That's it** — scanning the QR in Feishu auto-creates the app, writes credentials, and grants required permissions.
 
 DM the bot "hi" — you should see a streaming card immediately.
 
-> Detailed Feishu console setup → [docs/FAQ.md](./docs/FAQ.md) (Chinese)
+### Already have a Feishu app?
+
+If you've manually created an app on the Feishu Open Platform and want to reuse the App ID/Secret:
+
+```bash
+lark-kiro-bridge init --manual
+# Interactive prompts for App ID and Secret
+```
+
+Or one-line:
+
+```bash
+lark-kiro-bridge init --app-id cli_xxx --app-secret xxx
+```
+
+> Manual Feishu console setup (subscribe `im.message.receive_v1` + `card.action.trigger`) → [docs/FAQ.md](./docs/FAQ.md)
+
+### Background daemon (recommended for production)
+
+```bash
+lark-kiro-bridge start          # Install launchd plist and start
+lark-kiro-bridge status         # Check status
+lark-kiro-bridge restart        # Restart
+```
 
 ## 📖 Slash Commands
 
@@ -210,8 +232,10 @@ All other fields have sensible defaults.
 ### CLI
 
 ```bash
-lark-kiro-bridge init                # First-time setup
-lark-kiro-bridge run                 # Foreground (dev)
+lark-kiro-bridge init                # Scan QR to create Feishu app (recommended)
+lark-kiro-bridge init --manual       # Manually enter existing App ID/Secret
+lark-kiro-bridge init --app-id <id> --app-secret <s>   # One-shot (CI-friendly)
+lark-kiro-bridge run                 # Foreground (auto-launches QR if no config)
 lark-kiro-bridge config-show         # Show current config (redacted)
 
 lark-kiro-bridge start               # Install and start daemon
@@ -259,11 +283,11 @@ Design inspired by:
 
 ## Roadmap
 
-- **v0.2** ✅ Current (structured cards + button callbacks + Slack-style tool panels)
+- **v0.2** ✅ Current (structured cards + button callbacks + Slack-style tool panels + **QR app binding**)
 - **v0.3** Linux systemd / Windows Task Scheduler daemon
-- **v0.3** QR-code Feishu app binding (no manual App ID/Secret)
-- **v0.4** In-Feishu `/config` form for access policy
+- **v0.3** In-Feishu `/config` form for access policy
 - **v0.4** Voice input via Feishu ASR
+- **v0.4** Group-name → workspace heuristic (joining "agenzo" group defaults cwd to agenzo dir)
 - **v1.0** Centralized server deployment / multi-user isolation / web admin panel
 
 ## 📄 License

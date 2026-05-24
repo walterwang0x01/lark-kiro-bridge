@@ -70,24 +70,46 @@
 - macOS（Linux / Windows daemon 在路线图）
 - Node.js ≥ 20
 - `kiro-cli` 已安装并登录
-- 飞书企业自建应用 → 启用机器人能力 → 订阅 `im.message.receive_v1` + `card.action.trigger`（长连接模式）
+- 飞书账号（个人版即可，扫码自动创建应用）
 
-### 3 步上线
+### 30 秒上线 ⚡
 
 ```bash
 # 1. 安装
 npm i -g lark-kiro-bridge
 
-# 2. 配飞书凭证
-lark-kiro-bridge init
-
-# 3. 启动后台守护
-lark-kiro-bridge start
+# 2. 启动（首次会自动弹二维码 → 扫码同意 → 完成）
+lark-kiro-bridge run
 ```
+
+> **就这么简单**——飞书 App 扫码同意后，bridge 自动创建应用、配好凭证、开通必要权限。
 
 启动后在飞书私聊机器人发「你好」，应该立即看到流式刷新的卡片。
 
-> 飞书后台具体配置 → [docs/FAQ.md#机器人不响应](./docs/FAQ.md)
+### 想用已有的飞书应用？
+
+如果你已经在飞书开放平台手动建过应用，想复用已有的 App ID/Secret：
+
+```bash
+lark-kiro-bridge init --manual
+# 交互式输入 App ID 和 App Secret
+```
+
+或一行搞定：
+
+```bash
+lark-kiro-bridge init --app-id cli_xxx --app-secret xxx
+```
+
+> 飞书后台手动配置（订阅事件 `im.message.receive_v1` + `card.action.trigger`）→ [docs/FAQ.md](./docs/FAQ.md)
+
+### 后台守护（推荐生产）
+
+```bash
+lark-kiro-bridge start          # 装 launchd plist 并启动
+lark-kiro-bridge status         # 看状态
+lark-kiro-bridge restart        # 重启
+```
 
 ## 📖 飞书内的命令
 
@@ -210,8 +232,10 @@ lark-kiro-bridge start
 ### CLI
 
 ```bash
-lark-kiro-bridge init                # 首次配置
-lark-kiro-bridge run                 # 前台启动（开发用）
+lark-kiro-bridge init                # 扫码创建飞书应用（首选）
+lark-kiro-bridge init --manual       # 手动输入已有 App ID/Secret
+lark-kiro-bridge init --app-id <id> --app-secret <s>   # 一行搞定（CI 友好）
+lark-kiro-bridge run                 # 前台启动（首次自动跳扫码）
 lark-kiro-bridge config-show         # 显示当前配置（脱敏）
 
 lark-kiro-bridge start               # 装并起 daemon
@@ -259,11 +283,11 @@ node bin/lark-kiro-bridge.mjs run           # 本地跑（先 stop daemon）
 
 ## 路线图
 
-- **v0.2** ✅ 当前版（结构化卡片 + 按钮回调 + Slack-style 工具面板）
+- **v0.2** ✅ 当前版（结构化卡片 + 按钮回调 + Slack-style 工具面板 + **扫码绑定飞书应用**）
 - **v0.3** Linux systemd / Windows Task Scheduler 守护
-- **v0.3** 扫码绑定飞书应用，免去手填 App ID/Secret
-- **v0.4** 飞书内 `/config` 表单管理 access policy
+- **v0.3** 飞书内 `/config` 表单管理 access policy
 - **v0.4** 语音输入（飞书 ASR）
+- **v0.4** 群名 → 工作区的启发式默认（进 agenzo 群默认在 agenzo 目录）
 - **v1.0** 服务器集中部署 / 多用户隔离 / Web 管理面板
 
 ## 📄 License

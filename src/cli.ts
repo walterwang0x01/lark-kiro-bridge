@@ -12,6 +12,7 @@ import { createInterface } from 'node:readline/promises';
 import { existsSync } from 'node:fs';
 import { CONFIG_FILE, ensureDataDirs, LOGS_DIR } from './lib/paths.js';
 import { defaultConfig, loadConfig, saveConfig } from './lib/config.js';
+import { runQrWizard } from './lib/qrWizard.js';
 import { runBridge } from './core/bootstrap.js';
 import { getLogger } from './lib/logger.js';
 import {
@@ -32,21 +33,47 @@ program
 
 program
   .command('init')
-  .description('Interactive setup: write App ID/Secret and defaults to config file')
-  .option('--app-id <id>', 'Lark App ID (skip prompt)')
-  .option('--app-secret <secret>', 'Lark App Secret (skip prompt)')
+  .description('Interactive setup: scan QR or enter App ID/Secret')
+  .option('--app-id <id>', 'Lark App ID (skip QR + prompts)')
+  .option('--app-secret <secret>', 'Lark App Secret (skip QR + prompts)')
+  .option('--manual', 'Force manual entry (skip QR wizard)')
   .option('--force', 'Overwrite existing config')
-  .action(async (opts: { appId?: string; appSecret?: string; force?: boolean }) => {
-    ensureDataDirs();
-    if (existsSync(CONFIG_FILE) && !opts.force) {
-      console.error(
-        `Config already exists at ${CONFIG_FILE}. Use --force to overwrite, or edit it directly.`,
-      );
-      process.exit(1);
-    }
-    let appId = opts.appId;
-    let appSecret = opts.appSecret;
-    if (!appId || !appSecret) {
+  .action(
+    async (opts: { appId?: string; appSecret?: string; manual?: boolean; force?: boolean }) => {
+      ensureDataDirs();
+      if (existsSync(CONFIG_FILE) && !opts.force) {
+        console.error(
+          `Config already exists at ${CONFIG_FILE}. Use --force to overwrite, or edit it directly.`,
+        );
+        process.exit(1);
+      }
+
+      // 已直接传 --app-id / --app-secret 走快速模式
+      if (opts.appId && opts.appSecret) {
+        saveConfig(defaultConfig(opts.appId, opts.appSecret));
+        console.log(`✅ Wrote config to ${CONFIG_FILE}`);
+        console.log('  Run: lark-kiro-bridge run');
+        return;
+      }
+
+      // 默认走扫码向导（除非 --manual 或 stdin 不是 TTY）
+      if (!opts.manual && process.stdin.isTTY) {
+        try {
+          const { config } = await runQrWizard();
+          saveConfig(config);
+          console.log(`✅ 配置已保存到 ${CONFIG_FILE}`);
+          console.log('   下一步：lark-kiro-bridge run\n');
+          return;
+        } catch (e) {
+          console.error(`扫码向导失败：${(e as Error).message}`);
+          console.error('改用手动模式：lark-kiro-bridge init --manual\n');
+          process.exit(1);
+        }
+      }
+
+      // 手动模式：交互式问 ID/Secret
+      let appId = opts.appId;
+      let appSecret = opts.appSecret;
       const rl = createInterface({ input: process.stdin, output: process.stdout });
       try {
         if (!appId) appId = (await rl.question('Lark App ID: ')).trim();
@@ -54,28 +81,33 @@ program
       } finally {
         rl.close();
       }
-    }
-    if (!appId || !appSecret) {
-      console.error('App ID and Secret are required.');
-      process.exit(1);
-    }
-    saveConfig(defaultConfig(appId, appSecret));
-    console.log(`✅ Wrote config to ${CONFIG_FILE}`);
-    console.log('');
-    console.log('Defaults:');
-    console.log('  • workspace.defaultCwd : /Users/administrator/PycharmProjects');
-    console.log('  • workspace.allowedRoots: [/Users/administrator/PycharmProjects]');
-    console.log('  • kiro.trustedTools    : fs_read, fs_write, grep, glob, code');
-    console.log('');
-    console.log('Edit the file directly to customize. Then run:');
-    console.log('  lark-kiro-bridge run');
-  });
+      if (!appId || !appSecret) {
+        console.error('App ID and Secret are required.');
+        process.exit(1);
+      }
+      saveConfig(defaultConfig(appId, appSecret));
+      console.log(`✅ Wrote config to ${CONFIG_FILE}`);
+      console.log('  Run: lark-kiro-bridge run');
+    },
+  );
 
 program
   .command('run')
-  .description('Run the bridge in foreground')
+  .description('Run the bridge in foreground (auto-launch QR wizard if no config)')
   .action(async () => {
     try {
+      // 没配置：自动跳起扫码向导（开箱即用）
+      if (!existsSync(CONFIG_FILE) && process.stdin.isTTY) {
+        try {
+          const { config } = await runQrWizard();
+          saveConfig(config);
+          console.log(`✅ 配置已保存到 ${CONFIG_FILE}\n`);
+        } catch (e) {
+          console.error(`扫码向导失败：${(e as Error).message}`);
+          console.error('改用手动模式：lark-kiro-bridge init --manual\n');
+          process.exit(1);
+        }
+      }
       await runBridge();
       // 保持进程不退出，等信号
       await new Promise(() => undefined);
