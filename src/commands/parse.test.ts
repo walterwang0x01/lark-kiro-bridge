@@ -256,6 +256,20 @@ describe('parseCommand', () => {
     });
   });
 
+  describe('/selftest', () => {
+    it('/selftest', () => {
+      expect(parseCommand('/selftest')).toEqual({ kind: 'selftest' });
+    });
+
+    it('/check 别名', () => {
+      expect(parseCommand('/check')).toEqual({ kind: 'selftest' });
+    });
+
+    it('忽略尾部参数（无意义）', () => {
+      expect(parseCommand('/selftest abc')).toEqual({ kind: 'selftest' });
+    });
+  });
+
   describe('/model', () => {
     it('/model 不带参数 → show', () => {
       expect(parseCommand('/model')).toEqual({ kind: 'model', mode: 'show' });

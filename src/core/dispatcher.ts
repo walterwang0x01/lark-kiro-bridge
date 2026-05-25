@@ -59,6 +59,8 @@ import type { CronTask } from '../cron/store.js';
 import { parseExpression, nextRun, formatNextRun } from '../cron/expression.js';
 import { formToCron, type ScheduleForm } from '../cron/scheduleForm.js';
 import { buildScheduleFormCard, type ScheduleFormState } from '../card/scheduleCard.js';
+import { runSelfChecks } from '../lib/selftest.js';
+import { buildSelftestCard } from '../card/selftestCard.js';
 import {
   isUserAllowed,
   isAdmin,
@@ -509,6 +511,10 @@ export class Dispatcher {
           await this.handleDoctorCmd(msg, cmd.description, session.currentCwd);
           return;
         }
+        case 'selftest': {
+          await this.handleSelftestCmd(msg);
+          return;
+        }
         case 'model': {
           await this.handleModelCmd(msg, cmd, session.currentCwd);
           return;
@@ -672,6 +678,27 @@ export class Dispatcher {
     ].join('\n');
     const session = await this.sessions.get(msg.chatId, this.config.workspace.defaultCwd);
     await this.runKiroTask(msg, prompt, cwd, [], session.idleTimeoutMinutes);
+  }
+
+  /**
+   * /selftest 命令：跑结构化健康检查并回一张报告卡片。
+   *
+   * 检查项见 `src/lib/selftest.ts`。这里负责把运行时上下文（WS 状态、token 缓存）
+   * 注入给 runSelfChecks，结果交给 buildSelftestCard 渲染。
+   *
+   * 注意：hasTokenCache 在当前 SDK 没有公开 API 查询，用 isWsConnected() 近似——
+   * WS 连上就意味着 token 至少拿过一次。
+   */
+  private async handleSelftestCmd(msg: IncomingMessage): Promise<void> {
+    const wsConnected = this.lark.isWsConnected();
+    const report = await runSelfChecks({
+      config: this.config,
+      senderOpenId: msg.senderOpenId,
+      wsConnected,
+      hasTokenCache: wsConnected,
+      kiroBinPath: this.config.kiro.binPath,
+    });
+    await this.sendInteractiveCard(msg, buildSelftestCard(report));
   }
 
   /**

@@ -31,6 +31,8 @@ export class LarkClient {
   readonly api: lark.Client;
   private wsClient: lark.WSClient | null = null;
   private botOpenIdCache: string | null = null;
+  /** WebSocket 当前是否在连接状态。`/selftest` 用。*/
+  private wsConnectedFlag = false;
 
   constructor(opts: LarkClientOptions) {
     this.appId = opts.appId;
@@ -67,17 +69,21 @@ export class LarkClient {
       loggerLevel: lark.LoggerLevel.trace,
       logger: this.sdkLogger,
       onReady: () => {
+        this.wsConnectedFlag = true;
         this.log.info('lark websocket connected');
         handlers.onReady?.();
       },
       onReconnecting: () => {
+        this.wsConnectedFlag = false;
         this.log.warn('lark websocket reconnecting');
       },
       onReconnected: () => {
+        this.wsConnectedFlag = true;
         this.log.info('lark websocket reconnected');
         handlers.onReconnected?.();
       },
       onError: (err) => {
+        this.wsConnectedFlag = false;
         this.log.error({ err }, 'lark websocket error');
       },
     });
@@ -168,6 +174,13 @@ export class LarkClient {
   /** 业务侧主动设置 botOpenId（一般从配置或第一次 @bot 学习而来）。 */
   setBotOpenId(openId: string): void {
     this.botOpenIdCache = openId;
+  }
+
+  /**
+   * 当前 WebSocket 是否处于连接状态（供 /selftest 等命令查）。
+   */
+  isWsConnected(): boolean {
+    return this.wsConnectedFlag;
   }
 
   /**

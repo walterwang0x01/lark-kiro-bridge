@@ -40,6 +40,7 @@ export type ParsedCommand =
   | { kind: 'timeout'; mode: 'show' }
   | { kind: 'reconnect' }
   | { kind: 'doctor'; description: string }
+  | { kind: 'selftest' }
   | { kind: 'config'; mode: 'show' }
   | { kind: 'ps' }
   | { kind: 'exit'; target: string }
@@ -150,6 +151,9 @@ export function parseCommand(text: string): ParsedCommand | null {
       return { kind: 'reconnect' };
     case 'doctor':
       return { kind: 'doctor', description: tail };
+    case 'selftest':
+    case 'check':
+      return { kind: 'selftest' };
     case 'config':
     case 'cfg':
     case 'settings':

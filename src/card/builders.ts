@@ -382,6 +382,7 @@ export function buildHelpCard(): object {
       ['/exit <id>', '停止指定进程（管理员）'],
       ['/reconnect', '重连飞书 WebSocket'],
       ['/doctor [描述]', '看日志自诊断'],
+      ['/selftest', '健康检查报告（一键看 9 项配置/运行时状态）'],
     ]),
     hr(),
     columnSet({
