@@ -869,6 +869,9 @@ export function buildConfigFormCard(opts: {
           elements: [
             {
               tag: 'button',
+              // form 内的提交按钮必须带 name 属性，否则飞书客户端 200530 拒发。
+              // 见 zarazhangrui/feishu-claude-code-bridge v0.1.32 上游实现。
+              name: 'config_submit_btn',
               text: { tag: 'plain_text', content: '💾 保存' },
               type: 'primary_filled',
               size: 'small',
@@ -1317,6 +1320,8 @@ export function buildMemoryEditFormCard(opts: {
           elements: [
             {
               tag: 'button',
+              // form 内的提交按钮必须带 name 属性，否则飞书客户端 200530 拒发。
+              name: 'steering_edit_submit_btn',
               text: { tag: 'plain_text', content: '💾 保存' },
               type: 'primary_filled',
               size: 'small',
@@ -1420,6 +1425,8 @@ export function buildMemoryNewFormCard(opts: { scope: 'global' | 'project' }): o
           elements: [
             {
               tag: 'button',
+              // form 内的提交按钮必须带 name 属性，否则飞书客户端 200530 拒发。
+              name: 'steering_new_submit_btn',
               text: { tag: 'plain_text', content: '💾 创建' },
               type: 'primary_filled',
               size: 'small',
