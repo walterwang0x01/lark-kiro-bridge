@@ -2531,6 +2531,12 @@ export class Dispatcher {
             idleTimeoutMs,
             signal,
             onChunk: (text) => ctrl.feed(text),
+            // 把飞书上下文注入子进程，让 kiro-cli 用 lark-cli 时不用反向搜 chat_id
+            extraEnv: {
+              LARK_KIRO_CHAT_ID: msg.chatId,
+              LARK_KIRO_CHAT_TYPE: msg.chatType,
+              LARK_KIRO_SENDER_OPEN_ID: msg.senderOpenId,
+            },
           };
           if (resumeId !== undefined) runOpts.resumeId = resumeId;
           if (this.config.kiro.model !== undefined) runOpts.model = this.config.kiro.model;

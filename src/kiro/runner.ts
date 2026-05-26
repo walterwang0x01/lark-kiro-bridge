@@ -56,6 +56,12 @@ export interface RunOptions {
   onChunk?: (text: string) => void;
   /** AbortSignal 用于外部打断 */
   signal?: AbortSignal;
+  /**
+   * 额外的环境变量（合并到 process.env 之上）。
+   * 用途：把飞书侧的上下文（chatId / chatType / senderOpenId）注入子进程，
+   * 让 kiro-cli 通过工具（lark-cli 等）操作飞书时知道在哪个 chat 里。
+   */
+  extraEnv?: Record<string, string>;
 }
 
 export interface RunResult {
@@ -92,6 +98,7 @@ export async function runKiro(opts: RunOptions): Promise<RunResult> {
     idleTimeoutMs = 0,
     onChunk,
     signal,
+    extraEnv,
   } = opts;
 
   const args: string[] = ['chat', '--no-interactive'];
@@ -141,7 +148,7 @@ export async function runKiro(opts: RunOptions): Promise<RunResult> {
     stdout: 'pipe',
     stderr: 'pipe',
     detached: true,
-    env: { ...process.env, FORCE_COLOR: '0' }, // 尽量减少 ANSI（虽然没完全消除）
+    env: { ...process.env, FORCE_COLOR: '0', ...extraEnv }, // 尽量减少 ANSI；extraEnv 后置，可覆盖默认值
   });
 
   /**
