@@ -37,7 +37,7 @@
   },
   "dependencies": {
     "@larksuiteoapi/node-sdk": "^1.65.0",
-    "commander": "^14.0.3",
+    "commander": "^15.0.0",
     "croner": "^9.0.0",
     "execa": "^9.5.2",
     "p-queue": "^8.0.1",
