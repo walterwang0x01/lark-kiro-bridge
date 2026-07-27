@@ -40,7 +40,7 @@
     ]
   },
   "dependencies": {
-    "@larksuiteoapi/node-sdk": "^1.65.0",
+    "@larksuiteoapi/node-sdk": "^1.71.1",
     "@slack/bolt": "^4.7.3",
     "@slack/types": "^2.22.0",
     "@slack/web-api": "^7.19.0",
